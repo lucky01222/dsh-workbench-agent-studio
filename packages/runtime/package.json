@@ -1,0 +1,22 @@
+{
+  "name": "dsh-workbench-agent-studio-runtime",
+  "version": "1.8.3",
+  "description": "Portable Agent model, prompt and capability policy",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./dist/policy.mjs",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./schema": "./dist/schema.mjs"
+  },
+  "files": [
+    "dist",
+    "locale",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "0.1.7-rc.2"
+  }
+}

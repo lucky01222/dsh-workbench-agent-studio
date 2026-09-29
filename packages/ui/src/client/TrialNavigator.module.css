@@ -1,0 +1,33 @@
+/* Visual contract from DeepSeek Harness 0.1.7-rc.2 TurnNavigator (MIT). */
+.slot { position:absolute; inset:0; z-index:7; pointer-events:none; container-type:size; }
+.frame {
+ --turn-preview-height:100px;
+ position:absolute; top:50%; right:12px; width:28px;
+ max-height:min(calc(100cqh - 64px),420px); transform:translateY(-50%);
+ pointer-events:auto; contain:layout;
+}
+.scroller { position:relative; max-height:inherit; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; }
+.scroller::-webkit-scrollbar { display:none; }
+.marks { position:relative; padding:1px 0; }
+.mark { position:relative; display:block; width:100%; height:10px; padding:0; border:0; border-radius:8px; background:transparent; cursor:pointer; }
+.mark::before {
+ content:''; position:absolute; top:50%; right:0; width:20px; height:2px; border-radius:2px;
+ background:var(--dsw-alias-border-l4); transform:translateY(-50%) scaleX(.6); transform-origin:right center;
+ transition:transform 140ms ease,background-color 140ms ease;
+}
+.mark[data-preview]::before { transform:translateY(-50%) scaleX(.9); background:var(--dsw-alias-label-tertiary); }
+.mark[aria-current="true"]::before { transform:translateY(-50%) scaleX(1); background:var(--dsw-alias-label-primary); }
+.mark.mark:focus-visible { outline:none; }
+.mark:focus-visible::before { transform:translateY(-50%) scaleX(1); background:var(--dsw-alias-link); }
+.mark:focus-visible::after { content:''; position:absolute; inset:0 0 0 auto; width:20px; border-radius:inherit; outline:1px solid var(--dsw-alias-link); outline-offset:-1px; }
+.preview {
+ position:absolute; top:clamp(0px,calc(var(--turn-preview-center) - var(--turn-preview-height) / 2),calc(100% - var(--turn-preview-height)));
+ right:calc(100% + 10px); box-sizing:border-box; width:min(300px,calc(100cqw - 72px)); max-height:var(--turn-preview-height);
+ overflow:hidden; padding:10px 12px; border-radius:var(--dsw-radius-lg); color:var(--dsw-alias-label-primary);
+ background:var(--dsw-alias-bg-layer-1); box-shadow:var(--dsw-elevation-panel); pointer-events:none;
+}
+.previewPrompt,.previewResponse { display:-webkit-box; overflow:hidden; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
+.previewPrompt { font:var(--dsw-font-xs-strong-13); -webkit-line-clamp:1; }
+.previewResponse { margin-top:4px; color:var(--dsw-alias-label-caption); font:var(--dsw-font-xxs-12); -webkit-line-clamp:3; }
+@media (pointer:coarse) { .mark { height:24px; } }
+@media (prefers-reduced-motion:reduce) { .mark::before { transition:none; } }

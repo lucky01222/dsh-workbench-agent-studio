@@ -1,0 +1,23 @@
+/* Bihu control contract. Palette aliases keep their existing theme owner. */
+body {
+  --dsw-control-height-sm: 28px;
+  --dsw-control-height-md: 36px;
+  --dsw-control-height-input: 32px;
+  --dsw-control-height-pill: 24px;
+  --dsw-control-radius-input: 8px;
+  --dsw-control-radius-panel: 12px;
+  --dsw-control-radius-menu: 20px;
+  --dsw-control-radius-dialog: 24px;
+  --dsw-control-radius-settings: 32px;
+  --dsw-control-focus-width: 2px;
+  --dsw-control-focus-offset: 2px;
+  --dsw-control-motion-fast: 120ms;
+  --dsw-control-motion-normal: 180ms;
+  --dsw-alias-control-focus: var(--dsw-alias-brand-primary);
+  --dsw-alias-control-placeholder: var(--dsw-alias-label-secondary);
+  --dsw-alias-control-selected: var(--dsw-alias-button-ghost-active-fill);
+  --dsw-alias-control-selected-hover: var(--dsw-alias-button-ghost-active-hover);
+  --dsw-alias-control-selected-border: var(--dsw-alias-button-ghost-active-border);
+
+
+}

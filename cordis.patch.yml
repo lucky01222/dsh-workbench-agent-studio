@@ -1,0 +1,6 @@
+# One application switch; service owns data and jobs, UI owns route and browser slots.
+- insert:
+    - id: workbench-agent-studio-service
+      name: dsh-workbench-agent-studio-service
+    - id: workbench-agent-studio
+      name: dsh-workbench-agent-studio-ui

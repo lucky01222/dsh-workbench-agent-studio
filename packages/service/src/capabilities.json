@@ -1,0 +1,118 @@
+[
+  {
+    "id": "shell",
+    "tools": [
+      "bash",
+      "pwsh"
+    ],
+    "yaml": "- id: tool-bash\n  name: '@deepseek-ai/dsh-tool-bash'\n  disabled: !!js process.platform === 'win32'\n\n- id: tool-pwsh\n  name: '@deepseek-ai/dsh-tool-pwsh'\n  disabled: !!js process.platform !== 'win32'\n"
+  },
+  {
+    "id": "filesystem",
+    "tools": [
+      "read",
+      "write",
+      "edit",
+      "read_image",
+      "glob",
+      "grep"
+    ],
+    "yaml": "- id: tool-fs\n  name: '@deepseek-ai/dsh-tool-fs'\n\n- id: tool-fs-search\n  name: '@deepseek-ai/dsh-tool-fs-search'\n  config:\n    sampleOverCapGlobResults: false\n"
+  },
+  {
+    "id": "jobs",
+    "tools": [
+      "job_output",
+      "job_kill",
+      "job_list"
+    ],
+    "yaml": "- id: tool-jobs\n  name: '@deepseek-ai/dsh-tool-jobs'\n"
+  },
+  {
+    "id": "skills",
+    "tools": [
+      "skill"
+    ],
+    "yaml": "- id: skill-filesystem\n  name: '@deepseek-ai/dsh-skill-filesystem'\n\n- id: tool-skill\n  name: '@deepseek-ai/dsh-tool-skill'\n"
+  },
+  {
+    "id": "goals",
+    "tools": [
+      "get_goal",
+      "create_goal",
+      "update_goal"
+    ],
+    "yaml": "- id: command-goal\n  name: '@deepseek-ai/dsh-command-goal'\n\n- id: tool-goal\n  name: '@deepseek-ai/dsh-tool-goal'\n"
+  },
+  {
+    "id": "planning",
+    "tools": [
+      "enter_plan_mode",
+      "exit_plan_mode"
+    ],
+    "yaml": "- id: planning\n  name: cordis:group\n  group: true\n  isolate:\n    planMode: true\n  config:\n    - id: plan-mode\n      name: '@deepseek-ai/dsh-plan-mode'\n      config:\n        section: |\n              You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.\n\n              Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.\n\n              The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.\n\n              Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.\n\n              Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.\n\n              When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask \"should I proceed?\" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.\n"
+  },
+  {
+    "id": "delegation",
+    "tools": [
+      "send_message",
+      "interrupt_agent",
+      "list_agents",
+      "subagent",
+      "subagent_fork",
+      "workflow",
+      "ralph"
+    ],
+    "yaml": "- id: delegation\n  name: cordis:group\n  group: true\n  isolate:\n    workflowEngine: true\n  config:\n    - id: tool-subagent-control\n      name: '@deepseek-ai/dsh-tool-subagent-control'\n\n    - id: tool-subagent-list-agents\n      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'\n\n    - id: tool-subagent\n      name: '@deepseek-ai/dsh-tool-subagent'\n      config:\n        provider: spawn\n        toolName: subagent\n        modelSelectionSettings: true\n        backgroundMode: continuable\n\n    - id: tool-subagent-fork\n      name: '@deepseek-ai/dsh-tool-subagent'\n      config:\n        provider: fork\n        toolName: subagent_fork\n        backgroundMode: continuable\n\n    - id: tool-subagent-codex\n      name: '@deepseek-ai/dsh-tool-subagent'\n      disabled: true\n      config:\n        provider: codex\n        toolName: subagent_codex\n        backgroundMode: one-shot\n        maxDepth: provider-managed\n\n    - id: tool-subagent-claude-code\n      name: '@deepseek-ai/dsh-tool-subagent'\n      disabled: true\n      config:\n        provider: claude-code\n        toolName: subagent_claude_code\n        backgroundMode: one-shot\n        maxDepth: provider-managed\n\n    - id: workflow-ptc\n      name: '@deepseek-ai/dsh-workflow-ptc'\n      config:\n        provider: spawn\n\n    - id: tool-workflow\n      name: '@deepseek-ai/dsh-tool-workflow'\n\n    - id: tool-ralph\n      name: '@deepseek-ai/dsh-tool-ralph'\n      config:\n        subagentProvider: spawn\n        maxRounds: 64\n"
+  },
+  {
+    "id": "interaction",
+    "tools": [
+      "ask_user_question"
+    ],
+    "yaml": "- id: tool-ask-user\n  name: '@deepseek-ai/dsh-tool-ask-user'\n"
+  },
+  {
+    "id": "todo",
+    "tools": [
+      "todo_write"
+    ],
+    "yaml": "- id: tool-todo\n  name: '@deepseek-ai/dsh-tool-todo'\n  config:\n    allowParallelInProgress: true\n"
+  },
+  {
+    "id": "web",
+    "tools": [
+      "web_search",
+      "web_fetch"
+    ],
+    "yaml": "- id: tool-web\n  name: '@deepseek-ai/dsh-tool-web'\n  config:\n    fetch: true\n    searchTimeoutMs: 60000\n"
+  },
+  {
+    "id": "persistent-shell",
+    "tools": [
+      "bash",
+      "pwsh"
+    ],
+    "yaml": "- id: persistent-shell\n  name: cordis:group\n  group: true\n  isolate:\n    terminals: true\n  config:\n    - id: pty\n      name: '@deepseek-ai/dsh-terminal'\n\n    - id: terminal-bash\n      name: '@deepseek-ai/dsh-terminal-bash'\n      disabled: !!js process.platform === 'win32'\n      config:\n        timeoutMs: 300000\n\n    - id: persistent-bash\n      name: '@deepseek-ai/dsh-tool-bash-persistent'\n      disabled: !!js process.platform === 'win32'\n      config:\n        timeoutMs: 300000\n        description: |-\n          Run commands in a bash shell\n          * When invoking this tool, the contents of the \"command\" parameter does NOT need to be XML-escaped.\n          * You don't have access to the internet via this tool.\n          * You do have access to a mirror of common linux and python packages via apt and pip.\n          * State is persistent across command calls and discussions with the user.\n          * To inspect a particular line range of a file, e.g. lines 10-25, try 'sed -n 10,25p /path/to/the/file'.\n          * Please avoid commands that may produce a very large amount of output.\n          * Please run long lived commands in the background, e.g. 'sleep 10 &' or start a server in the background.\n\n    - id: terminal-pwsh\n      name: '@deepseek-ai/dsh-terminal-bash'\n      disabled: !!js process.platform !== 'win32'\n      config:\n        shellDialect: pwsh\n        timeoutMs: 300000\n\n    - id: persistent-pwsh\n      name: '@deepseek-ai/dsh-tool-pwsh-persistent'\n      disabled: !!js process.platform !== 'win32'\n      config:\n        timeoutMs: 300000\n        description: |-\n          Run commands in a PowerShell shell\n          * When invoking this tool, the contents of the \"command\" parameter does NOT need to be XML-escaped.\n          * You don't have access to the internet via this tool.\n          * State is persistent across command calls and discussions with the user.\n          * Use native Windows paths (C:\\...) and $env:NAME variables; this is PowerShell, not bash.\n          * Please avoid commands that may produce a very large amount of output.\n          * Please run long lived commands in the background, e.g. 'Start-Job' or start a server with Start-Process.\n"
+  },
+  {
+    "id": "string-editor",
+    "tools": [
+      "str_replace_editor"
+    ],
+    "yaml": "- id: filesystem\n  name: cordis:group\n  group: true\n  isolate:\n    fs: true\n  config:\n    - id: fs-local\n      name: '@deepseek-ai/dsh-fs-local'\n      config:\n        cwd: !!js process.env.DSH_CWD ?? process.cwd()\n\n    - id: str-replace-editor\n      name: '@deepseek-ai/dsh-tool-str-replace-editor'\n      config:\n        maxOutputChars: 16000\n"
+  },
+  {
+    "id": "cordis",
+    "tools": [
+      "cordis_inspect_list",
+      "cordis_inspect_query",
+      "cordis_inspect_self",
+      "cordis_define",
+      "cordis_run",
+      "cordis_stop",
+      "cordis_undefine"
+    ],
+    "yaml": "- id: tool-cordis\n  name: '@deepseek-ai/dsh-tool-cordis'\n"
+  }
+]

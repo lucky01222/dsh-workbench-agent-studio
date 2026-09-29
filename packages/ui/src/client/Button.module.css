@@ -1,0 +1,95 @@
+/* Capsule geometry from the figma Button component (1:155 instances:
+ * h36, pad 14/7, gap 4, r18; the wide New Session form is r24 at h38 —
+ * owners with the wide form set their own radius/width). */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: none;
+  border-radius: calc(var(--dsw-control-height-md) / 2);
+  corner-shape: round;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  padding: 0 14px;
+  font-family: inherit;
+  transition: background-color var(--dsw-control-motion-fast), border-color var(--dsw-control-motion-fast);
+}
+
+.button:focus-visible {
+  outline: var(--dsw-control-focus-width) solid var(--dsw-alias-control-focus);
+  outline-offset: var(--dsw-control-focus-offset);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.md {
+  height: var(--dsw-control-height-md);
+}
+
+/* Compact height for dense rows; no dedicated figma node (Icon_container
+ * 28x28 is the icon-only form) — geometry is ours. */
+.sm {
+  height: var(--dsw-control-height-sm);
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 10px;
+  border-radius: calc(var(--dsw-control-height-sm) / 2);
+  corner-shape: round;
+}
+
+.primary {
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--dsw-alias-button-primary-hover);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.ghost:active:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
+/* Dialog Cancel (figma 451:18655): bordered capsule on transparent fill. */
+.outline {
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  background: transparent;
+}
+
+.outline:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.toolbar {
+  background: var(--dsw-alias-button-tool-bar-fill);
+}
+
+.toolbar:hover:not(:disabled) {
+  background: var(--dsw-alias-button-tool-bar-hover);
+}
+
+.icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Shared outline, soft and ghost controls use DSH geometry and semantic colors. */
+.rounded { border-radius: var(--dsw-control-radius-input); gap: 6px; white-space: nowrap; flex-shrink: 0; }
+.danger { color: var(--dsw-alias-state-error-primary); }
+.danger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-danger); }
+.danger.primary { background: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-label-primary-foreground); }
+.danger.primary:hover:not(:disabled) { background: var(--dsw-alias-state-error-primary); filter: brightness(0.94); }

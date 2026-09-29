@@ -1,0 +1,24 @@
+node_modules/
+dist/
+packages/*/dist/
+.npm-pack-cache/
+.release-stage-*/
+.studio-client-tests-*/
+release/
+*.tgz
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Local design material and generated development records.
+.superdesign/
+.impeccable/
+docs/dev-loop/
+documentation/dev-loop/
+work/
+outputs/
+artifacts/
+*.log
+*.swp
+*.swo
