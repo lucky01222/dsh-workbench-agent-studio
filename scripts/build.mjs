@@ -10,7 +10,10 @@ await host({policy:'packages/runtime/src/policy.mjs',schema:'packages/runtime/sr
 await host({index:'packages/ui/src/index.mjs'},'packages/ui/dist')
 const result=await build({entryPoints:['packages/ui/src/client/entry.tsx'],outfile:'packages/ui/dist/client-body.js',write:false,bundle:true,platform:'browser',format:'cjs',jsx:'automatic',target:'es2022',external:['react','react-dom','react/jsx-runtime','@deepseek-ai/*']})
 const js=result.outputFiles.find(f=>f.path.endsWith('.js')).text,css=result.outputFiles.find(f=>f.path.endsWith('.css'))?.text||''
-await writeFile('packages/ui/dist/client.js',`window.__ModuleLoader__.load({id:'dsh-workbench-agent-studio-ui',factory(require){var module={exports:{}};var exports=module.exports;${js}\nconst plugin=module.exports;return {...plugin,apply(ctx){ctx.effect(()=>{const style=document.createElement('style');style.textContent=${JSON.stringify(css)};document.head.append(style);return ()=>style.remove()});return plugin.apply(ctx)}}}});\n`)
+// CSS is installed at apply time, after the Loader has inventoried this factory.
+// Tag it before insertion so a later module cannot claim and remove our styles.
+const clientId='dsh-workbench-agent-studio-ui'
+await writeFile('packages/ui/dist/client.js',`window.__ModuleLoader__.load({id:${JSON.stringify(clientId)},factory(require){var module={exports:{}};var exports=module.exports;${js}\nconst plugin=module.exports;return {...plugin,apply(ctx){ctx.effect(()=>{const style=document.createElement('style');style.setAttribute('data-plugin',${JSON.stringify(clientId)});style.setAttribute('data-plugin-css',${JSON.stringify(clientId)});style.textContent=${JSON.stringify(css)};document.head.append(style);return ()=>style.remove()});return plugin.apply(ctx)}}}});\n`)
 // Only remove retired generated artifacts; sources and data never pass through this path.
 await rm('dist/client.js',{force:true})
 console.log('Built service, portable runtime, UI and compatibility bundle')

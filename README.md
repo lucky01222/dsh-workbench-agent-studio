@@ -8,7 +8,7 @@
 
 ```sh
 export DSH_HOME=/absolute/path/to/your-dsh-home
-dsh plugin --profile web add /absolute/path/dsh-workbench-agent-studio-1.8.4.tgz --ignore-scripts --offline
+dsh plugin --profile web add /absolute/path/dsh-workbench-agent-studio-1.8.5.tgz --ignore-scripts --offline
 dsh web --host 127.0.0.1 --port 3184
 ```
 
@@ -49,4 +49,10 @@ npm run pack:release -- ./release
 
 `DSH_RUNTIME_ROOT` 指向安装有官方 Harness `node_modules` 的目录。`check` 为 JavaScript 语法检查，不是全量 TypeScript 检查。测试夹具的使用方式见 `test/fixtures/README.md`。
 
-发布目录中的 `dsh-workbench-agent-studio-1.8.4.tgz` 是完整安装包，其余三个 tgz 用于单独分发组件。第三方许可证见 `THIRD_PARTY_NOTICES.md`。
+发布目录中的 `dsh-workbench-agent-studio-1.8.5.tgz` 是完整安装包，其余三个 tgz 用于单独分发组件。第三方许可证见 `THIRD_PARTY_NOTICES.md`。
+
+## 1.8.5 样式修复
+
+修复其他 Client 插件热更新或卸载后，Agent 工作室整块界面丢失样式的问题。工作室 CSS 在 `apply` 阶段注入，晚于官方 Loader 对其 factory 的样式认领；未标记的 CSS 会被后续加载的插件认领，再被那个插件的清理流程删除。现在注入前设置 `data-plugin` 和 `data-plugin-css`，由工作室自身持有和清理。
+
+本次检查保留工作室现有共享控件、主题 tokens、配置/试运行布局与草稿数据。`test:client` 会先重新构建，再执行真实生成的 Client bundle，覆盖其他插件样式认领/替换、工作室停用/重新启用以及旧实例清理。该测试使用内存 DOM 和模拟的 Loader 样式操作；实际官方 Loader 与浏览器验证应另行记录，不能据此声称全量浏览器兼容。

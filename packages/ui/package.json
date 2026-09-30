@@ -1,6 +1,6 @@
 {
   "name": "dsh-workbench-agent-studio-ui",
-  "version": "1.8.4",
+  "version": "1.8.5",
   "description": "Agent Studio Web editor and authenticated API adapter",
   "type": "module",
   "license": "MIT",

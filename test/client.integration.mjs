@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { StudioController } from '../packages/ui/src/client/controller.mjs'
+import './client-styles.integration.mjs'
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject}}
 const definition={name:'A',description:'',provider:'test',model:'test',modelSelection:'explicit',systemPrompt:'old',tools:[],skills:[]}
 const doc=id=>({id,agentPreset:id,revision:1,definition:{...definition,name:id},readOnly:false})
