@@ -1,17 +1,19 @@
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { PromptController } from './prompt-controller.ts'
 import { ConnectorController } from './connector-controller.ts'
+import { buildPluginCatalog, clonePluginSelection, selectionFromTools, flattenPluginSelection } from './plugin-capabilities.mjs'
+import { PluginChoiceStore, samePluginSelection, samePluginBaseline } from './plugin-choice-store.mjs'
 const clone=v=>structuredClone(v), uid=()=>crypto.randomUUID(), blank=()=>[{id:uid(),role:'user',text:''}]
-const initial=()=>({roster:{authorable:true,presets:[]},models:null,document:null,draft:null,status:'saved',busy:false,loading:true,error:null,cwd:'',catalog:null,catalogLoading:false,openIds:[],contexts:[],contextKey:'',settings:{reactLoop:false,autoTools:false},messages:blank(),output:[],executingToolIds:[],runs:[],evaluations:[],results:{},input:'',inputMessages:[],undoable:false,redoable:false,sessionReadyId:null})
+const initial=()=>({roster:{authorable:true,presets:[]},models:null,document:null,draft:null,status:'saved',busy:false,loading:true,error:null,cwd:'',catalog:null,catalogLoading:false,pluginSelection:null,pluginSavedSelection:null,pluginBaseline:null,pluginIntentWorkspace:null,pluginDirectory:null,pluginDirectoryError:null,pluginStorageWarning:false,openIds:[],contexts:[],contextKey:'',settings:{reactLoop:false,autoTools:false},messages:blank(),output:[],executingToolIds:[],runs:[],evaluations:[],results:{},input:'',inputMessages:[],undoable:false,redoable:false,sessionReadyId:null})
 export class StudioController {
- constructor(api){this.api=api;this.store=createSnapshotStore(initial());this.tabs=new Map();this.undo=[];this.redo=[];this.alive=true;this.pollGeneration=0;this.selectionGeneration=0;this.busyCount=0;this.catalogGeneration=0;this.recordsGeneration=0;this.runLoadGeneration=0;this.manualGeneration=0;this.saving=new Map();this.pendingPrompts=new Map();this.records=createSnapshotStore({query:{},page:{items:[]},loading:false,error:null,detail:null});this.writer=new PromptController(this,{start:r=>this.prompt(r),get:id=>this.promptGet(id),stop:id=>this.promptStop(id)});this.connector=new ConnectorController(Object.fromEntries(['status','providers','actions','refresh','restart','select','console'].map(method=>[method,args=>api('connector'+method[0].toUpperCase()+method.slice(1),args??{})])))}
+ constructor(api,{choiceStore=new PluginChoiceStore(),pluginDirectoryProvider=null}={}){this.api=api;this.choiceStore=choiceStore;this.pluginDirectoryProvider=pluginDirectoryProvider;this.store=createSnapshotStore(initial());this.tabs=new Map();this.undo=[];this.redo=[];this.alive=true;this.pollGeneration=0;this.selectionGeneration=0;this.busyCount=0;this.catalogGeneration=0;this.recordsGeneration=0;this.runLoadGeneration=0;this.manualGeneration=0;this.saving=new Map();this.pendingPrompts=new Map();this.records=createSnapshotStore({query:{},page:{items:[]},loading:false,error:null,detail:null});this.writer=new PromptController(this,{start:r=>this.prompt(r),get:id=>this.promptGet(id),stop:id=>this.promptStop(id)});this.connector=new ConnectorController(Object.fromEntries(['status','providers','actions','refresh','restart','select','console'].map(method=>[method,args=>api('connector'+method[0].toUpperCase()+method.slice(1),args??{})])))}
  getSnapshot=()=>this.store.getSnapshot()
  subscribe=fn=>this.store.subscribe(fn)
  publish(patch){if(!this.alive)return;this.store.set({...this.getSnapshot(),...patch});this.persist()}
  async guard(task,{busy=true}={}){if(busy){this.busyCount++;this.publish({busy:true,error:null})}const epoch=this.selectionGeneration;try{return await task()}catch(e){if(epoch===this.selectionGeneration)this.publish({error:e.message});throw e}finally{if(busy){this.busyCount--;this.publish({busy:this.busyCount>0})}}}
- capture(){const s=this.getSnapshot();return {document:s.document,draft:s.draft,cwd:s.cwd,messages:s.messages,runState:s.runState,settings:s.settings,status:s.status,runs:s.runs,evaluations:s.evaluations,results:s.results,catalog:s.catalog,undo:this.undo,redo:this.redo}}
+ capture(){const s=this.getSnapshot();return {document:s.document,draft:s.draft,cwd:s.cwd,messages:s.messages,runState:s.runState,settings:s.settings,status:s.status,runs:s.runs,evaluations:s.evaluations,results:s.results,catalog:s.catalog,pluginSelection:s.pluginSelection,pluginSavedSelection:s.pluginSavedSelection,pluginBaseline:s.pluginBaseline,pluginIntentWorkspace:s.pluginIntentWorkspace,pluginStorageWarning:s.pluginStorageWarning,undo:this.undo,redo:this.redo}}
  persist(){if(!this.restored)return;const s=this.getSnapshot();if(s.document)this.tabs.set(s.document.agentPreset,this.capture());try{localStorage.setItem('wb-studio-workspace-v2',JSON.stringify({active:s.document?.agentPreset,openIds:s.openIds,tabs:[...this.tabs]}))}catch{/* Explicitly saved documents remain on Host; local draft is best-effort. */}}
- async refresh(){const boot=await this.api('bootstrap');const models=await this.api('models');this.documents=boot.agents;this.publish({roster:{authorable:true,presets:[...boot.agents.map(d=>({id:d.id,name:d.definition.name,description:d.definition.description,managed:true})),...boot.presets.map(p=>({...p,builtIn:true}))]},models:{groups:models,default:boot.defaultModel},cwd:this.getSnapshot().cwd||boot.cwd});return boot}
+ async refresh(){const boot=await this.api('bootstrap');const models=await this.api('models');this.documents=boot.agents;this.workspace=boot.cwd;this.publish({roster:{authorable:true,presets:[...boot.agents.map(d=>({id:d.id,name:d.definition.name,description:d.definition.description,managed:true})),...boot.presets.map(p=>({...p,builtIn:true}))]},models:{groups:models,default:boot.defaultModel},cwd:this.getSnapshot().cwd||boot.cwd});return boot}
  async initialize(){await this.guard(async()=>{await this.refresh();try{const saved=JSON.parse(localStorage.getItem('wb-studio-workspace-v2')||'null');if(saved){this.tabs=new Map(saved.tabs);this.publish({openIds:saved.openIds});this.restored=true;if(saved.active&&this.tabs.has(saved.active))await this.open(saved.active)}else{const legacy=JSON.parse(localStorage.getItem('wb-studio-draft')||'null');this.restored=true;if(legacy?.doc){await this.open(legacy.doc.id);this.publish({draft:legacy.draft,messages:legacy.messages||blank(),settings:{reactLoop:legacy.mode==='react',autoTools:legacy.mode==='tool-batch'},status:JSON.stringify(legacy.draft)===JSON.stringify(legacy.doc.definition)?'saved':'dirty'})}}}catch(e){this.publish({error:'草稿恢复失败：'+e.message});this.restored=true}finally{this.publish({loading:false})}})}
  doc(raw,readOnly=false){return {...raw,agentPreset:raw.id,readOnly,runtime:raw.runtime||(raw.sourcePreset||readOnly?{source:raw.sourcePreset||raw.id}:undefined)}}
  async open(id){
@@ -20,25 +22,68 @@ export class StudioController {
   if(current.document)this.tabs.set(current.document.agentPreset,this.capture());
   this.pollGeneration++;clearTimeout(this.timer);const saved=this.tabs.get(id);
   if(saved){this.undo=saved.undo||[];this.redo=saved.redo||[];this.publish({...saved,output:[],toolRunState:undefined,sessionReadyId:saved.runState?.run?.sessionId||null,error:null,openIds:[...new Set([...current.openIds,id])],undoable:this.undo.length>0,redoable:this.redo.length>0});if(['running','preparing'].includes(saved.runState?.run?.status))this.poll(saved.runState.run.id,id)}
-  else{const raw=this.documents.find(d=>d.id===id)||await this.api('readPreset',{id,cwd:current.cwd});if(epoch!==this.selectionGeneration||!this.alive)return;this.undo=[];this.redo=[];this.publish({document:this.doc(raw,raw.readOnly),draft:clone(raw.definition),messages:blank(),output:[],runState:undefined,toolRunState:undefined,status:'saved',error:null,runs:[],evaluations:[],catalog:null,openIds:[...new Set([...this.getSnapshot().openIds,id])],undoable:false,redoable:false})}
+  else{const raw=this.documents.find(d=>d.id===id)||await this.api('readPreset',{id,cwd:current.cwd});if(epoch!==this.selectionGeneration||!this.alive)return;this.undo=[];this.redo=[];this.publish({document:this.doc(raw,raw.readOnly),draft:clone(raw.definition),messages:blank(),output:[],runState:undefined,toolRunState:undefined,status:'saved',error:null,runs:[],evaluations:[],catalog:null,pluginSelection:null,pluginSavedSelection:null,pluginBaseline:null,pluginIntentWorkspace:null,pluginStorageWarning:false,openIds:[...new Set([...this.getSnapshot().openIds,id])],undoable:false,redoable:false})}
   await Promise.all([this.refreshCatalog(),this.history()]);
  }
- close(id){if(this.getSnapshot().busy||this.getSnapshot().executingToolIds.length)return;const s=this.getSnapshot();this.tabs.set(s.document?.agentPreset,this.capture());const ids=s.openIds.filter(x=>x!==id);this.publish({openIds:ids});if(s.document?.agentPreset===id){if(ids.length)void this.open(ids.at(-1));else {this.selectionGeneration++;this.pollGeneration++;this.publish({document:null,draft:null,runState:undefined})}}}
- change=patch=>{const s=this.getSnapshot();if(s.document?.readOnly)return;const draft={...s.draft,...patch};if(patch.skills?.length)draft.tools=[...new Set([...draft.tools,'skill'])];if(patch.tools&&!draft.tools.includes('skill'))draft.skills=[];this.publish({draft,status:JSON.stringify(draft)===JSON.stringify(s.document.definition)?'saved':'dirty'})}
+ close(id){if(this.getSnapshot().busy||this.getSnapshot().executingToolIds.length)return;const s=this.getSnapshot();this.tabs.set(s.document?.agentPreset,this.capture());const ids=s.openIds.filter(x=>x!==id);this.publish({openIds:ids});if(s.document?.agentPreset===id){if(ids.length)void this.open(ids.at(-1));else {this.selectionGeneration++;this.pollGeneration++;this.publish({document:null,draft:null,pluginSelection:null,pluginSavedSelection:null,pluginBaseline:null,pluginIntentWorkspace:null,runState:undefined})}}}
+ pluginWorkspace(){return this.workspace||this.getSnapshot().cwd||''}
+ pluginCatalog(snapshot=this.getSnapshot()){
+  const rows=[...(snapshot.catalog?.tools||[])],ids=new Set(rows.map(row=>row.id||row.name));
+  for(const name of snapshot.draft?.tools||[])if(!name.startsWith('openconnector/')&&!ids.has(name)){rows.push({name,id:name,description:'',unavailable:'当前运行位置不可用'});ids.add(name)}
+  return buildPluginCatalog(rows,{installedBundles:snapshot.pluginDirectory?.bundles||[],unavailable:snapshot.catalog?.unavailable||[]})
+ }
+ pluginDocumentBaseline(document){return document?{id:document.id,revision:document.revision,definition:{tools:[...document.definition.tools]}}:null}
+ configurationStatus(draft,selection,savedSelection,document=this.getSnapshot().document){return JSON.stringify(draft)===JSON.stringify(document?.definition)&&samePluginSelection(selection,savedSelection)?'saved':'dirty'}
+ reconcilePlugins(snapshot=this.getSnapshot()){
+  if(!snapshot.document||!snapshot.draft)return {};
+  const catalog=this.pluginCatalog(snapshot),server=this.documents?.find(doc=>doc.id===snapshot.document.id)||snapshot.document;
+  const workspace=this.pluginWorkspace(),crossWorkspace=snapshot.pluginIntentWorkspace&&snapshot.pluginIntentWorkspace!==workspace;
+  const sourceDraft=crossWorkspace?{...snapshot.draft,tools:[...server.definition.tools],skills:[...server.definition.skills]}:snapshot.draft;
+  const stored=this.choiceStore.read(server,workspace);
+  const current=snapshot.pluginSelection&&snapshot.pluginIntentWorkspace===workspace&&samePluginBaseline(snapshot.pluginBaseline,server)?snapshot.pluginSelection:null;
+  const selection=selectionFromTools(sourceDraft.tools,catalog,current||stored);
+  const saved=selectionFromTools(snapshot.document.definition.tools,catalog,stored);
+  const external=sourceDraft.tools.filter(name=>name.startsWith('openconnector/'));
+  const tools=flattenPluginSelection(selection,catalog),draft=snapshot.document.readOnly?sourceDraft:{...sourceDraft,tools:[...new Set([...tools,...external])]};
+  if(!snapshot.document.readOnly&&!draft.tools.includes('skill')&&draft.skills.length)draft.skills=[];
+  return {pluginSelection:selection,pluginSavedSelection:saved,pluginBaseline:this.pluginDocumentBaseline(server),pluginIntentWorkspace:workspace,draft,
+   status:['conflict','saving','error'].includes(snapshot.status)?snapshot.status:this.configurationStatus(draft,selection,saved,snapshot.document)}
+ }
+ change=patch=>{
+  const s=this.getSnapshot();if(s.document?.readOnly)return;const draft={...s.draft,...patch};
+  if(patch.skills?.length)draft.tools=[...new Set([...draft.tools,'skill'])];if(patch.tools&&!draft.tools.includes('skill'))draft.skills=[];
+  let selection=s.pluginSelection;
+  if(patch.tools||patch.skills){const catalog=this.pluginCatalog({...s,draft}),next=selectionFromTools(draft.tools,catalog);
+   for(const [id,choice] of Object.entries(selection||{})){if(!choice.enabled||choice.mode!=='all')continue;const plugin=catalog.find(p=>p.id===id);if(!plugin)continue;
+    const desired=new Set(flattenPluginSelection({[id]:choice},[plugin]));const actual=plugin.tools.filter(tool=>draft.tools.includes(tool.id)).map(tool=>tool.id);
+    if(desired.size===actual.length&&actual.every(name=>desired.has(name)))next[id]=clonePluginSelection({[id]:choice})[id];
+   }selection=next;
+  }
+  this.publish({draft,pluginSelection:selection,status:this.configurationStatus(draft,selection,s.pluginSavedSelection,s.document)})
+ }
+ changePlugins=selection=>{
+  const s=this.getSnapshot();if(s.document?.readOnly||!s.draft)return;const catalog=this.pluginCatalog(s);
+  const tools=[...new Set([...flattenPluginSelection(selection,catalog),...s.draft.tools.filter(name=>name.startsWith('openconnector/'))])];
+  const draft={...s.draft,tools,...(!tools.includes('skill')?{skills:[]}:{})};
+  const next=clonePluginSelection(selection);this.publish({draft,pluginSelection:next,status:this.configurationStatus(draft,next,s.pluginSavedSelection,s.document)})
+ }
  async create(name){return this.guard(async()=>{const d=await this.api('create',{name});await this.refresh();await this.open(d.id)})}
  async save(){const id=this.getSnapshot().document.id;if(this.saving.has(id))return this.saving.get(id);const task=this.saveDocument().finally(()=>this.saving.delete(id));this.saving.set(id,task);return task}
  async saveDocument(){
   const s=this.getSnapshot(),epoch=this.selectionGeneration;if(s.document.readOnly)return s.document;this.publish({status:'saving'});
-  try{const raw=await this.api('save',{id:s.document.id,revision:s.document.revision,definition:s.draft});const doc=this.doc(raw);
-   if(epoch===this.selectionGeneration&&this.getSnapshot().document?.id===doc.id){const changed=JSON.stringify(this.getSnapshot().draft)!==JSON.stringify(s.draft);this.publish({document:doc,...(!changed?{draft:clone(raw.definition)}:{}),status:changed?'dirty':'saved'})}
-   else{const tab=this.tabs.get(doc.id);if(tab)this.tabs.set(doc.id,{...tab,document:doc,status:JSON.stringify(tab.draft)===JSON.stringify(raw.definition)?'saved':'dirty'})}
+  try{const raw=await this.api('save',{id:s.document.id,revision:s.document.revision,definition:s.draft});const doc=this.doc(raw);const savedSelection=clonePluginSelection(s.pluginSelection||selectionFromTools(s.draft.tools,this.pluginCatalog(s)));const stored=this.choiceStore.write(doc,this.pluginWorkspace(),savedSelection);
+   if(epoch===this.selectionGeneration&&this.getSnapshot().document?.id===doc.id){const changed=JSON.stringify(this.getSnapshot().draft)!==JSON.stringify(s.draft)||!samePluginSelection(this.getSnapshot().pluginSelection||selectionFromTools(this.getSnapshot().draft.tools,this.pluginCatalog()),savedSelection);this.publish({document:doc,...(!changed?{draft:clone(raw.definition)}:{}),pluginSavedSelection:savedSelection,pluginBaseline:this.pluginDocumentBaseline(doc),pluginStorageWarning:!stored,status:changed?'dirty':'saved'})}
+   else{const tab=this.tabs.get(doc.id);if(tab)this.tabs.set(doc.id,{...tab,document:doc,pluginSavedSelection:savedSelection,pluginBaseline:this.pluginDocumentBaseline(doc),pluginStorageWarning:!stored,status:this.configurationStatus(tab.draft,tab.pluginSelection,savedSelection,doc)})}
    await this.refresh();return doc;
   }catch(e){if(epoch===this.selectionGeneration)this.publish({status:/已更新|conflict/i.test(e.message)?'conflict':'error',error:e.message});throw e}
  }
- async copy(name){await this.guard(async()=>{const s=this.getSnapshot();if(!s.document.readOnly&&s.status!=='saved')await this.save();const d=s.document.readOnly?await this.api('copyPreset',{id:s.document.id,name,cwd:s.cwd}):await this.api('copy',{id:s.document.id});if(!s.document.readOnly&&name!==d.definition.name)await this.api('save',{id:d.id,revision:d.revision,definition:{...d.definition,name}});await this.refresh();await this.open(d.id)})}
- async remove(){await this.guard(async()=>{const id=this.getSnapshot().document.id;await this.api('delete',{id});this.tabs.delete(id);this.publish({document:null,draft:null,openIds:this.getSnapshot().openIds.filter(v=>v!==id)});await this.refresh()})}
- async reload(){const id=this.getSnapshot().document.id;this.tabs.delete(id);this.publish({document:null});await this.refresh();await this.open(id)}
- async refreshCatalog(){const s=this.getSnapshot(),epoch=++this.catalogGeneration,selection=this.selectionGeneration;this.publish({catalogLoading:true});try{const result=await this.api('catalog',{cwd:s.cwd,selected:s.draft?.tools||[]});if(epoch===this.catalogGeneration&&selection===this.selectionGeneration&&this.getSnapshot().cwd===s.cwd)this.publish({catalog:result})}finally{if(epoch===this.catalogGeneration)this.publish({catalogLoading:false})}}
+ async copy(name){await this.guard(async()=>{const s=this.getSnapshot();if(!s.document.readOnly&&s.status!=='saved')await this.save();let d=s.document.readOnly?await this.api('copyPreset',{id:s.document.id,name,cwd:s.cwd}):await this.api('copy',{id:s.document.id});if(!s.document.readOnly&&name!==d.definition.name)d=await this.api('save',{id:d.id,revision:d.revision,definition:{...d.definition,name}});if(s.pluginSelection)this.choiceStore.write(this.doc(d),this.pluginWorkspace(),s.pluginSelection);await this.refresh();await this.open(d.id)})}
+ async remove(){await this.guard(async()=>{const id=this.getSnapshot().document.id;await this.api('delete',{id});this.choiceStore.remove(this.pluginWorkspace(),id);this.tabs.delete(id);this.publish({document:null,draft:null,pluginSelection:null,pluginSavedSelection:null,pluginBaseline:null,pluginIntentWorkspace:null,openIds:this.getSnapshot().openIds.filter(v=>v!==id)});await this.refresh()})}
+ async reload(){const id=this.getSnapshot().document.id;this.tabs.delete(id);this.publish({document:null,pluginSelection:null,pluginSavedSelection:null,pluginBaseline:null,pluginIntentWorkspace:null});await this.refresh();await this.open(id)}
+ async refreshCatalog(){const s=this.getSnapshot(),epoch=++this.catalogGeneration,selection=this.selectionGeneration;this.publish({catalogLoading:true});try{
+  const [result,directory]=await Promise.all([this.api('catalog',{cwd:s.cwd,selected:s.draft?.tools||[]}),this.pluginDirectoryProvider?this.pluginDirectoryProvider().catch(error=>({error:String(error.message||error)})):Promise.resolve(s.pluginDirectory)]);
+  if(epoch===this.catalogGeneration&&selection===this.selectionGeneration&&this.getSnapshot().cwd===s.cwd){const current={...this.getSnapshot(),catalog:result,...(directory&&!directory.error?{pluginDirectory:directory}:{}),pluginDirectoryError:directory?.error||null};this.publish({...current,...this.reconcilePlugins(current)})}
+ }finally{if(epoch===this.catalogGeneration)this.publish({catalogLoading:false})}}
  edit=messages=>{const s=this.getSnapshot();this.undo=[...this.undo,clone(s.messages)];this.redo=[];this.publish({messages:clone(messages),output:[],undoable:true,redoable:false})}
  undoMessages=()=>{if(!this.undo.length)return;this.redo=[...this.redo,this.getSnapshot().messages];this.publish({messages:this.undo.at(-1),undoable:this.undo.length>1,redoable:true});this.undo=this.undo.slice(0,-1);this.persist()}
  redoMessages=()=>{if(!this.redo.length)return;this.undo=[...this.undo,this.getSnapshot().messages];this.publish({messages:this.redo.at(-1),undoable:true,redoable:this.redo.length>1});this.redo=this.redo.slice(0,-1);this.persist()}
