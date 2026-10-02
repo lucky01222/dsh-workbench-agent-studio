@@ -44,7 +44,7 @@ export function PluginCapabilitySummary({ catalog, selection, readOnly, loading,
         official.reduce((count, plugin) => count + chosenPluginTools(plugin, selection).length, 0), official.map(plugin => plugin.id),
       )}
       {remaining.map(plugin => renderRow(
-        t(plugin.nameKey),
+        plugin.nameKey ? t(plugin.nameKey) : plugin.name,
         selection[plugin.id].mode === 'all' && plugin.origin !== 'unassigned' ? t('pluginSummaryAll')
           : t('pluginSummaryCustom', { selected: chosenPluginTools(plugin, selection).length, total: plugin.tools.length }),
         chosenPluginTools(plugin, selection).length, [plugin.id],

@@ -198,7 +198,7 @@ export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly Plu
                 <div className={css.capability}><label>{t('pluginCapabilitiesLabel')}</label><div>
                   <PluginCapabilitySummary catalog={plugins} selection={pluginSelection} readOnly={readOnly} loading={state.catalogLoading}
                     t={pluginT} onOpen={openPlugins} onRemove={removePlugins} />
-                  {!readOnly && <p className={css.hint}>{t('pluginFrontendHint')}</p>}
+                  {!readOnly && <p className={css.hint}>{t(state.capabilityBindings ? 'pluginServerHint' : 'pluginFrontendHint')}</p>}
                   {state.pluginStorageWarning && <p className={css.hint} role="status">{t('pluginStorageWarning')}</p>}
                   {state.pluginDirectoryError && <details className={css.pluginWarning}><summary>{t('pluginDirectoryWarning')}</summary><p>{state.pluginDirectoryError}</p></details>}
                 </div></div>
@@ -246,7 +246,7 @@ export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly Plu
       footer={<Button variant="primary" onClick={() => { setDialog(null) }}>{t('close')}</Button>}>
       <div className={css.pluginCheck}><p className={css.hint}>{t('pluginCheckHint')}</p><p className={css.hint}>{t('pluginPickerSummary', { plugins: pluginSummary.plugins, tools: pluginSummary.tools })}</p>
         {plugins.filter(plugin => pluginSelection[plugin.id]?.enabled).map(plugin => <section key={plugin.id} className={css.pluginCheckRow}>
-          <strong>{pluginT(plugin.nameKey)}</strong><span>{t('pluginPickerToolCount', { count: chosenPluginTools(plugin, pluginSelection).length })}</span>
+          <strong>{plugin.nameKey ? pluginT(plugin.nameKey) : plugin.name}</strong><span>{t('pluginPickerToolCount', { count: chosenPluginTools(plugin, pluginSelection).length })}</span>
           {plugin.reasonKey && <p className={css.hint}>{pluginT(plugin.reasonKey)}</p>}
           {plugin.requiresContext && <p className={css.hint}>{t('pluginPickerContext', { context: plugin.requiresContext })}</p>}
           <details><summary>{t('pluginCheckTools')}</summary><pre>{chosenPluginTools(plugin, pluginSelection).map(tool => tool.name).join('\n')}</pre></details>

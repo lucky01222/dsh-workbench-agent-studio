@@ -1,4 +1,4 @@
-/** Frontend selection intent. The Host still receives its existing tools:string[] contract. */
+/** Durable plugin intent; tools[] remains the resolved preview and legacy contract. */
 export type PluginMode = 'all' | 'custom'
 export type PluginOrigin = 'official' | 'custom' | 'unassigned'
 export interface PluginTool {
@@ -30,7 +30,7 @@ export interface PluginCapability {
   requiredPlugins?: readonly string[]
   version?: string
   installed?: boolean
-  discovery: 'known-registration' | 'unassigned'
+  discovery: 'known-registration' | 'host-registry' | 'unassigned'
 }
 export interface PluginChoice {
   enabled: boolean
@@ -64,6 +64,9 @@ export interface CatalogToolRow {
   unavailable?: string
   requiresContext?: string
   label?: string
+  /** null is an authoritative declaration that ownership cannot be attributed. */
+  pluginId?: string | null
+  pluginVersion?: string
 }
 export interface InstalledBundle {
   packageName?: string
@@ -79,4 +82,7 @@ export interface PluginCatalogOptions {
   /** Supply only metadata actually returned by the Host; absence means installation is unknown. */
   installedBundles?: readonly (InstalledBundle | string)[]
   unavailable?: readonly { provider: string; reason: string }[]
+  capabilityBindings?: boolean
+  /** Preserve missing selections under their recorded owner, never a new owner with the same name. */
+  selection?: PluginSelection
 }

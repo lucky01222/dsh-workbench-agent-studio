@@ -1,7 +1,7 @@
 /**
  * Frontend presentation of verified registration contracts for Harness 0.1.7-rc.2.
- * The current catalog has no owner metadata: this table is explicit, not dynamic
- * owner discovery. Unknown names/identities always stay individually selected.
+ * Old Hosts use explicit verified contracts. New Hosts supply authoritative
+ * pluginId metadata; the table then supplies labels rather than ownership.
  */
 const official = (suffix, key, name, description, tools, provider) => ({
   id: `@deepseek-ai/${suffix}`, packageName: `@deepseek-ai/${suffix}`,
@@ -49,7 +49,9 @@ const availableIds = plugin => plugin.tools.filter(tool => tool.available).map(t
 const normalizeChoice = choice => ({ enabled: choice?.enabled === true, mode: choice?.mode === 'all' ? 'all' : 'custom', tools: unique(Array.isArray(choice?.tools) ? choice.tools : []) })
 const emptyChoice = () => ({ enabled: false, mode: 'custom', tools: [] })
 
-function ownerOf(row) {
+function ownerOf(row, authoritative) {
+  if (Object.hasOwn(row, 'pluginId')) return typeof row.pluginId === 'string' && row.pluginId.length > 0 && row.pluginId !== UNASSIGNED ? row.pluginId : null
+  if (authoritative) return null
   const owner = nameOwner.get(row.name)
   if (!owner) return null
   // Current Host rows contain plain names. A new qualified identity without an
@@ -71,25 +73,39 @@ function missingTool(id, requiresContext) {
 
 /** Build a presentation catalog from actual Host tool rows; never synthesize availability. */
 export function buildPluginCatalog(toolRows = [], options = {}) {
-  const groups = new Map(KNOWN_PLUGIN_CONTRACTS.map(plugin => [plugin.id, []]))
+  const authoritative = options.capabilityBindings === true || toolRows.some(row => row && Object.hasOwn(row, 'pluginId'))
+  const metadata = new Map(KNOWN_PLUGIN_CONTRACTS.map(plugin => [plugin.id, plugin]))
+  const groups = new Map(authoritative ? [] : KNOWN_PLUGIN_CONTRACTS.map(plugin => [plugin.id, []]))
+  const versions = new Map()
   const unknown = []
   const seen = new Set()
   for (const row of toolRows) {
     if (!row || typeof row.name !== 'string' || connector(row) || seen.has(keyOf(row))) continue
     seen.add(keyOf(row))
-    const owner = ownerOf(row)
-    ;(owner ? groups.get(owner) : unknown).push(toolFromRow(row))
+    const owner = ownerOf(row, authoritative)
+    if (owner) {
+      if (!groups.has(owner)) groups.set(owner, [])
+      groups.get(owner).push(toolFromRow(row))
+      if (typeof row.pluginVersion === 'string') versions.set(owner, row.pluginVersion)
+    } else unknown.push(toolFromRow(row))
   }
   const installed = new Map((options.installedBundles || []).map(bundle => typeof bundle === 'string'
     ? [bundle, { installed: true }] : [bundle.packageName || bundle.name, bundle]))
+  if (authoritative) {
+    for (const id of installed.keys()) if (metadata.has(id) && !groups.has(id)) groups.set(id, [])
+    for (const id of Object.keys(options.selection || {})) if (id !== UNASSIGNED && !groups.has(id)) groups.set(id, [])
+  }
   const failures = new Map((options.unavailable || []).map(failure => [failure.provider, failure.reason]))
-  const plugins = KNOWN_PLUGIN_CONTRACTS.map(contract => {
-    const actual = groups.get(contract.id)
+  const plugins = [...groups].map(([id, actual]) => {
+    const contract = metadata.get(id) || { id, packageName: id, name: id, nameKey: '', description: '', descriptionKey: '',
+      origin: id.startsWith('@deepseek-ai/') ? 'official' : 'custom', names: [], discovery: 'host-registry' }
     const actualNames = new Set(actual.map(tool => tool.name))
     const bundle = installed.get(contract.packageName)
     const disabled = bundle?.enabled === false
     const absent = bundle?.installed === false
-    const tools = [...actual, ...contract.names.filter(name => !actualNames.has(name)).map(name => missingTool(name, contract.requiresContext))]
+    const missing = authoritative ? options.selection?.[id]?.tools || [] : contract.names
+    const actualIds = new Set(actual.map(tool => tool.id))
+    const tools = [...actual, ...unique(missing).filter(name => authoritative ? !actualIds.has(name) : !actualNames.has(name)).map(name => missingTool(name, contract.requiresContext))]
     const activeTools = disabled || absent ? tools.map(tool => ({ ...tool, available: false,
       reasonKey: absent ? 'pluginPickerPluginNotInstalled' : 'pluginPickerPluginDisabled' })) : tools
     const available = activeTools.some(tool => tool.available)
@@ -98,11 +114,11 @@ export function buildPluginCatalog(toolRows = [], options = {}) {
     const reasonKey = absent ? 'pluginPickerPluginNotInstalled' : disabled ? 'pluginPickerPluginDisabled'
       : !available ? contract.requiresContext ? 'pluginPickerContextRequired' : 'pluginPickerNotInCatalog'
       : activeTools.some(tool => !tool.available) ? 'pluginPickerPartiallyAvailable' : undefined
-    const { names, provider, ...metadata } = contract
-    return { ...metadata, tools: activeTools, available,
+    const { names, provider, ...labels } = contract
+    return { ...labels, discovery: authoritative ? 'host-registry' : labels.discovery, tools: activeTools, available,
       ...(reason ? { reason, unavailable: !available ? reason : undefined } : {}),
       ...(reasonKey ? { reasonKey } : {}),
-      ...(bundle?.version ? { version: bundle.version } : {}),
+      ...(versions.has(id) || bundle?.version ? { version: versions.get(id) || bundle.version } : {}),
       ...(typeof bundle?.installed === 'boolean' ? { installed: bundle.installed } : {}) }
   })
   plugins.push({ id: UNASSIGNED, packageName: '', name: '未识别归属的工具', nameKey: 'pluginCapabilityUnassigned',
@@ -126,7 +142,12 @@ export function selectionFromTools(tools = [], catalog = [], persisted) {
   const assigned = new Set(Object.values(selection).filter(choice => choice.enabled).flatMap(choice => choice.tools))
   for (const key of unique(tools).filter(key => !key.startsWith('openconnector/'))) {
     if (assigned.has(key)) continue
-    const id = owned.get(key) || UNASSIGNED
+    let id = owned.get(key) || UNASSIGNED
+    const owner = catalog.find(plugin => plugin.id === id)
+    // A legacy name is not evidence that its historical provider changed. Keep
+    // exact tools without intent unassigned when the old contract cannot agree
+    // with the new authoritative owner.
+    if (!persisted && owner?.discovery === 'host-registry' && nameOwner.get(key) !== id) id = UNASSIGNED
     const current = selection[id] || emptyChoice()
     selection[id] = { ...current, enabled: true, tools: [...current.tools, key] }
     assigned.add(key)
@@ -203,8 +224,9 @@ export function togglePluginTool(selection, plugin, toolId, checked) {
 const officialPlugins = catalog => catalog.filter(plugin => plugin.origin === 'official' && plugin.available)
 export function officialBundleState(catalog, selection) {
   const plugins = officialPlugins(catalog)
-  if (!plugins.some(plugin => selection[plugin.id]?.enabled)) return 'none'
-  return plugins.every(plugin => selection[plugin.id]?.enabled && selection[plugin.id]?.mode === 'all') ? 'all' : 'partial'
+  const selected = catalog.filter(plugin => plugin.origin === 'official' && selection[plugin.id]?.enabled)
+  if (!selected.length) return 'none'
+  return selected.every(plugin => plugin.available) && plugins.every(plugin => selection[plugin.id]?.enabled && selection[plugin.id]?.mode === 'all') ? 'all' : 'partial'
 }
 
 export function proposeOfficialBundle(selection, catalog, enabled) {
@@ -244,10 +266,15 @@ export function setOfficialBundle(selection, catalog, enabled, options = {}) {
 
 export function summarizePluginSelection(selection, catalog) {
   const tools = flattenPluginSelection(selection, catalog)
-  const actual = new Map(catalog.flatMap(plugin => plugin.tools.map(tool => [tool.id, tool])))
+  const index = new Map(catalog.map(plugin => [plugin.id, plugin]))
+  const unavailable = new Set()
+  for (const [id, choice] of Object.entries(selection)) {
+    if (!choice.enabled) continue
+    const plugin = index.get(id)
+    for (const tool of plugin ? chosenPluginTools(plugin, selection) : choice.tools.map(id => missingTool(id))) if (!tool.available) unavailable.add(tool.id)
+  }
   const plugins = catalog.filter(plugin => plugin.origin !== 'unassigned' && selection[plugin.id]?.enabled).length
-  const availableTools = tools.filter(id => actual.get(id)?.available).length
-  return { plugins, tools: tools.length, availableTools, unavailable: tools.length - availableTools,
+  return { plugins, tools: tools.length, availableTools: tools.length - unavailable.size, unavailable: unavailable.size,
     unassigned: (selection[UNASSIGNED]?.enabled ? selection[UNASSIGNED].tools.length : 0) }
 }
 

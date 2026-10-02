@@ -180,3 +180,50 @@ test('legacy choice is copied without shared arrays and special object keys do n
   assert.deepEqual(selection.__proto__.tools, ['exact'])
   assert.equal(Object.getPrototypeOf(copy), Object.prototype)
 })
+
+test('authoritative null ownership suppresses static-name fallback and declared but absent tools', () => {
+  const catalog = buildPluginCatalog([
+    { name: 'library_search', description: 'Reliable unknown owner', pluginId: null },
+    { name: 'read', description: 'Metadata absent in an authoritative response' },
+  ], { capabilityBindings: true })
+  assert.deepEqual(plugin(catalog, 'unassigned').tools.map(tool => tool.id), ['library_search', 'read'])
+  assert.equal(catalog.some(item => item.id === 'dsh-library-knowledge'), false)
+  assert.equal(catalog.some(item => item.id === '@deepseek-ai/dsh-tool-fs'), false)
+})
+
+test('dynamic registration adds arbitrary tools to its authoritative plugin without name guesses', () => {
+  const id = 'custom-research-plugin'
+  const before = buildPluginCatalog([{ name: 'lookup_a', description: 'Read A', pluginId: id, pluginVersion: '1.0.0' }])
+  const dynamic = plugin(before, id)
+  assert.equal(dynamic.discovery, 'host-registry')
+  assert.equal(dynamic.version, '1.0.0')
+  const whole = setPluginEnabled({}, dynamic, true)
+  const exact = { [id]: { enabled: true, mode: 'custom', tools: ['lookup_a'] } }
+  const after = buildPluginCatalog([
+    { name: 'lookup_a', description: 'Read A', pluginId: id, pluginVersion: '1.1.0' },
+    { name: 'find_b', description: 'Find B', pluginId: id, pluginVersion: '1.1.0' },
+  ], { capabilityBindings: true, selection: whole })
+  assert.deepEqual(flattenPluginSelection(whole, after), ['lookup_a', 'find_b'])
+  assert.deepEqual(flattenPluginSelection(exact, after), ['lookup_a'])
+})
+
+test('a tool moving to another authoritative owner remains missing under the saved original owner', () => {
+  const oldId = '@deepseek-ai/dsh-tool-fs'
+  const saved = { [oldId]: { enabled: true, mode: 'all', tools: ['read'] } }
+  const catalog = buildPluginCatalog([{ name: 'read', description: 'Different provider', pluginId: 'other-reader' }], { capabilityBindings: true, selection: saved })
+  const restored = selectionFromTools(['read'], catalog, saved)
+  assert.equal(restored['other-reader'], undefined)
+  assert.equal(chosenPluginTools(plugin(catalog, 'dsh-tool-fs'), restored)[0].available, false)
+  assert.equal(summarizePluginSelection(restored, catalog).unavailable, 1)
+  const legacy = selectionFromTools(['read'], buildPluginCatalog([{ name: 'read', description: '', pluginId: 'other-reader' }]))
+  assert.equal(legacy['other-reader'], undefined)
+  assert.deepEqual(legacy.unassigned.tools, ['read'])
+})
+
+test('official bundle stays partial when a saved official plugin has lost every available tool', () => {
+  const id = '@deepseek-ai/dsh-tool-fs'
+  const saved = { [id]: { enabled: true, mode: 'all', tools: ['read'] } }
+  const catalog = buildPluginCatalog([], { capabilityBindings: true, selection: saved })
+  assert.equal(officialBundleState(catalog, saved), 'partial')
+  assert.equal(summarizePluginSelection(saved, catalog).unavailable, 1)
+})

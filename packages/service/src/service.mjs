@@ -11,6 +11,7 @@ import { Definition, Document, RunInput, Run, Evaluation, Receipt, Prompt, valid
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import { renderPrompt, renderContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import { executeFinite } from './execution.mjs'
+import { resolveCapabilities, toolsForScope, packageOf } from 'dsh-workbench-agent-studio-runtime/capabilities'
 import providers from './capabilities.json' with { type: 'json' }
 const spec = defineDomain({ name: 'workbench_agent_studio', version: 1, tables: {
   agents: domainTable(Document), revisions: domainTable(Document), runs: domainTable(Run),
@@ -42,16 +43,35 @@ export class StudioService {
   }
   lock(task) { const p = this.serial.then(task); this.serial = p.catch(() => {}); return p }
   document(id) { const doc = this.domain.table('agents').get(z.string().uuid().parse(id)); if (!doc || doc.deleted) throw error('Agent not found', 'NOT_FOUND'); return clone(doc) }
-  rows(definition, all = false, baseYaml, connectorSnapshot) {
+  rows(definition, all = false, baseYaml, connectorSnapshot, capabilityResolution) {
     const rows = baseYaml ? yaml.load(baseYaml, {schema:entryListSchema}) : []
-    const names = new Set(); const walk = entries => { for(const row of entries){names.add(row.name); if(row.group && Array.isArray(row.config))walk(row.config)} };walk(rows)
+    const existing = new Map()
+    const remember = entries => { for (const row of entries) {
+      if (row.group && Array.isArray(row.config)) remember(row.config)
+      else { const values = existing.get(row.name) || []; values.push(row.config); existing.set(row.name, values) }
+    } }; remember(rows)
     for (const provider of providers) {
-      if (provider.id === 'persistent-shell') continue // Same tool names: use the default one-shot provider.
-      if (!all && !provider.tools.some(t => definition.tools.includes(t))) continue
-      for (const row of yaml.load(provider.yaml, { schema: entryListSchema })) { if (names.has(row.name)) continue; rows.push({ ...row, id: `studio-${provider.id}-${row.id}` }); }
+      if (provider.id === 'persistent-shell') continue
+      const candidates = yaml.load(provider.yaml, { schema: entryListSchema })
+      const modules = []
+      const collect = entries => { for (const row of entries) row.group && Array.isArray(row.config) ? collect(row.config) : modules.push(row.name) }; collect(candidates)
+      const bound = modules.some(name => definition.pluginBindings?.[packageOf(name)]?.enabled)
+      if (!all && !bound && !provider.tools.some(t => definition.tools.includes(t))) continue
+      const append = entries => entries.flatMap(row => {
+        if (row.group && Array.isArray(row.config)) {
+          const config = append(row.config)
+          return config.length ? [{ ...row, id: `studio-${provider.id}-${row.id}`, config }] : []
+        }
+        const previous = existing.get(row.name) || []
+        const multiple = modules.filter(name => name === row.name).length > 1
+        if (previous.length && (!multiple || previous.some(config => (config?.toolName || 'subagent') === (row.config?.toolName || 'subagent')))) return []
+        existing.set(row.name, [...previous, row.config])
+        return [{ ...row, id: `studio-${provider.id}-${row.id}` }]
+      })
+      rows.push(...append(candidates))
     }
     if(!all && definition.tools.some(t=>t.startsWith('openconnector/'))) rows.push({id:'studio-connector',name:'dsh-workbench-agent-studio/connector-agent',config:connectorSnapshot})
-    if (!all) rows.push({ id: 'studio-policy', name: 'dsh-workbench-agent-studio-runtime', config: { definition, inheritedComposition: !!baseYaml } })
+    if (!all) rows.push({ id: 'studio-policy', name: 'dsh-workbench-agent-studio-runtime', config: { definition, inheritedComposition: !!baseYaml, ...(capabilityResolution ? { capabilityResolution } : {}) } })
     return rows
   }
   async readPreset(id, cwd) {
@@ -80,7 +100,7 @@ export class StudioService {
   async directory(cwd) { if (!isAbsolute(cwd)) throw error('工作目录必须是绝对路径'); const path = await realpath(cwd); if (!(await stat(path)).isDirectory()) throw error('工作目录不存在'); return path }
   async createHandle(doc, cwd, signal) {
     const preset = `wb-studio-run-${randomUUID()}`
-    const release = await this.ctx.agentPresets.register({ id: preset, name: doc.definition.name, plugins: this.rows(doc.definition, false, doc.baseYaml, doc.connectorSnapshot) })
+    const release = await this.ctx.agentPresets.register({ id: preset, name: doc.definition.name, plugins: this.rows(doc.definition, false, doc.baseYaml, doc.connectorSnapshot, doc.capabilityResolution) })
     try {
       const handle = await this.ctx.agents.create({ sessionId: randomUUID(), meta: { cwd, agentPreset: preset }, agentOptions: { provider: doc.definition.provider, model: doc.definition.model }, signal: AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]),
         setup: c => this.ctx.agentPresets.mount(c, preset).then(() => {}) })
@@ -93,8 +113,11 @@ export class StudioService {
     const release = await this.ctx.agentPresets.register({ id, plugins: rows })
     let handle
     try {
+      // Some official providers register only after agent/created (notably the
+      // session-specific subagent model selector). Probe their real lifecycle;
+      // never invoke a model or a tool while reading the directory.
       handle = await this.ctx.agents.create({ sessionId: randomUUID(), signal: this.lifetime.signal, meta: { cwd: path, agentPreset: id }, setup: c => this.ctx.agentPresets.mount(c, id).then(() => {}) })
-      const tools = this.ctx.tools.schemas(handle.agent).map(t => ({ name: t.name, description: t.description }))
+      const tools = await toolsForScope(this.ctx, handle.agent)
       const skills = (await this.ctx.skills.list({ cwd: path, scope: handle.agent })).filter(s => s.invocation.modelInvocable).map(s => ({ name: s.name, description: s.description }))
       return { tools, skills }
     } finally { if (handle) await handle.dispose(); await release() }
@@ -115,15 +138,22 @@ export class StudioService {
       return { tools: [...tools.values()], skills: [...skills.values()], unavailable }
     }
   }
+  async capabilities(doc, cwd) {
+    // A copied preset's disabled rows, configured variants and shadowed tools
+    // must be checked in the exact composition that will run.
+    const catalog = doc.baseYaml
+      ? await this.catalogRows(cwd, this.rows(doc.definition, false, doc.baseYaml, doc.connectorSnapshot).filter(row => row.id !== 'studio-policy'))
+      : await this.catalog(cwd)
+    if (this.connector) catalog.tools.push(...await this.connector.catalog(doc.definition.tools))
+    const resolved = resolveCapabilities(doc.definition, catalog.tools)
+    for (const name of resolved.definition.skills) if (!catalog.skills.some(skill => skill.name === name)) throw error(`Skill 不可用：${name}`, 'CAPABILITY_UNAVAILABLE')
+    return { ...doc, definition: resolved.definition, capabilityResolution: resolved.resolution }
+  }
   async preflight(doc, cwd, signal) {
     const definition = this.selection(doc.definition)
     await this.ctx.llm.resolveCallConfig({ provider: definition.provider, model: definition.model, ...(definition.reasoningEffort ? { reasoningEffort: definition.reasoningEffort } : {}) }, signal)
-    const catalog = await this.catalog(cwd)
-    if(this.connector){await this.connector.preflight(definition);catalog.tools.push(...await this.connector.catalog(definition.tools))}
-    if(doc.baseYaml){const base=await this.catalogRows(cwd,yaml.load(doc.baseYaml,{schema:entryListSchema}));catalog.tools.push(...base.tools);catalog.skills.push(...base.skills)}
-    for (const t of definition.tools) if (!catalog.tools.some(x => (x.id||x.name) === t)) throw error(`工具不可用：${t}`, 'CAPABILITY_UNAVAILABLE')
-    for (const s of definition.skills) if (!catalog.skills.some(x => x.name === s)) throw error(`Skill 不可用：${s}`, 'CAPABILITY_UNAVAILABLE')
-    return { ...doc, definition }
+    if (this.connector) await this.connector.preflight(definition)
+    return this.capabilities({ ...doc, definition }, cwd)
   }
   run(id) { const r = this.live.get(id)?.record ?? this.domain.table('runs').get(id); if (!r) throw error('Run not found', 'NOT_FOUND'); return clone(r) }
   dispatch(method, args = {}) {
@@ -136,7 +166,7 @@ export class StudioService {
     if (this.closing) throw error('Studio is stopping', 'UNAVAILABLE')
     if(method.startsWith('connector') && !this.connector) throw error('OpenConnector 接入暂缓', 'UNAVAILABLE')
     switch (method) {
-      case 'bootstrap': return { presets: (await this.ctx.agentPresets.list()).filter(p=>!p.id.startsWith('wb-studio-')), defaultModel:this.ctx.get('agentDefaultModel')?.currentSelection(), cwd: this.cwd, agents: [...this.domain.table('agents').entries()].map(([, value]) => value).filter(d => !d.deleted), version: '1.8.2', harness: '0.1.7-rc.2' }
+      case 'bootstrap': return { presets: (await this.ctx.agentPresets.list()).filter(p=>!p.id.startsWith('wb-studio-')), defaultModel:this.ctx.get('agentDefaultModel')?.currentSelection(), cwd: this.cwd, agents: [...this.domain.table('agents').entries()].map(([, value]) => value).filter(d => !d.deleted), capabilityBindings: true, version: '1.10.0', harness: '0.1.7-rc.2' }
       case 'readPreset': return this.readPreset(z.string().parse(args.id), args.cwd || this.cwd)
       case 'copyPreset': return this.lock(async()=>{const preset=await this.readPreset(args.id,args.cwd||this.cwd), t=now(); const doc=Document.parse({id:randomUUID(),revision:1,createdAt:t,updatedAt:t,definition:{...preset.definition,name:args.name||preset.definition.name+' 副本'},baseYaml:preset.baseYaml,runtime:preset.runtime,sourcePreset:args.id});await this.domain.table('agents').put(doc.id,doc);await this.domain.table('revisions').put(`${doc.id}:1`,doc);await this.register(doc);return doc})
       case 'receipts': return [...this.domain.table('receipts').entries()].map(([,v])=>v).filter(v=>v.runId===args.id)
@@ -149,7 +179,7 @@ export class StudioService {
       case 'connectorSelect': await this.connector.detail(z.string().parse(args)); return true
       case 'connectorConsole': return this.connector.consoleUrl()
       case 'models': return Promise.all(this.ctx.llm.listProviders().map(async p => ({ ...p, models: await this.ctx.llm.listModels(p.id).catch(() => []) })))
-      case 'catalog': {const result=await this.catalog(z.string().parse(args.cwd));if(this.connector)result.tools.push(...await this.connector.catalog(args.selected||[]));return result}
+      case 'catalog': {const result=await this.catalog(z.string().parse(args.cwd));if(this.connector)result.tools.push(...await this.connector.catalog(args.selected||[]));return {...result,capabilityBindings:true}}
       case 'create': return this.lock(async () => {
         const t = now(), doc = Document.parse({ id: randomUUID(), revision: 1, createdAt: t, updatedAt: t, definition: { name: z.string().parse(args.name), description: '', modelSelection: 'unset', provider: '', model: '', systemPrompt: '', tools: [], skills: [] } })
         await this.domain.table('agents').put(doc.id, doc); await this.domain.table('revisions').put(`${doc.id}:1`, doc); await this.register(doc); return doc
@@ -157,10 +187,12 @@ export class StudioService {
       case 'save': return this.lock(async () => {
         const doc = this.document(args.id)
         if (doc.revision !== args.revision) throw error('Agent 已更新，请重新加载后再保存。', 'REVISION_CONFLICT')
-        const definition = Definition.parse(args.definition)
+        let definition = Definition.parse(args.definition)
+        // Validate and cache the current expansion without persisting a run snapshot.
+        if (definition.pluginBindings !== undefined) definition = (await this.capabilities({ ...doc, definition }, args.cwd ? await this.directory(z.string().parse(args.cwd)) : this.cwd)).definition
         if (!this.connector && definition.tools.some(t=>t.startsWith('openconnector/'))) throw error('OpenConnector 接入暂缓', 'UNAVAILABLE')
         const connectorSnapshot = definition.tools.some(t=>t.startsWith('openconnector/')) ? (await this.connector.compose(definition))[0].config : undefined
-        const next = Document.parse({ ...doc, revision: doc.revision + 1, definition, connectorSnapshot, updatedAt: now() })
+        const next = Document.parse({ ...doc, capabilityResolution: undefined, revision: doc.revision + 1, definition, connectorSnapshot, updatedAt: now() })
         await this.domain.table('revisions').put(`${doc.id}:${next.revision}`, next)
         await this.domain.table('agents').put(doc.id, next); await this.register(next); return next
       })
@@ -174,7 +206,7 @@ export class StudioService {
         if ([...this.live.values()].some(v => v.record.document.id === doc.id && active(v.record))) throw error('请先停止此 Agent 的试运行。')
         await this.domain.table('agents').put(doc.id, { ...doc, deleted: true }); const id = `wb-studio-${doc.id}`; await this.registered.get(id)?.(); this.registered.delete(id); return true
       })
-      case 'export': { const d = this.document(args.id); return yaml.dump([{ insert: [{ id: `wb-preset-${d.id}`, name: '@deepseek-ai/dsh-agent-preset', config: { id: `wb-studio-${d.id}`, name: d.definition.name, plugins: this.rows(d.definition, false, d.baseYaml, d.connectorSnapshot) } }] }], { schema: entryListSchema, lineWidth: -1, noRefs: true }) }
+      case 'export': { const d = this.document(args.id); return yaml.dump([{id:'tools',name:'@deepseek-ai/dsh-tools',disabled:true},{ insert: [{id:'studio-tool-registry',name:'dsh-workbench-agent-studio-runtime/tool-registry'},{id:'studio-capability-snapshots',name:'dsh-workbench-agent-studio-runtime/snapshots'}, { id: `wb-preset-${d.id}`, name: '@deepseek-ai/dsh-agent-preset', config: { id: `wb-studio-${d.id}`, name: d.definition.name, plugins: this.rows(d.definition, false, d.baseYaml, d.connectorSnapshot) } }] }], { schema: entryListSchema, lineWidth: -1, noRefs: true }) }
       case 'runPreset': {const source=await this.readPreset(args.id,args.cwd),t=now(),doc=Document.parse({...source,id:randomUUID(),sourcePreset:source.id,createdAt:t,updatedAt:t});return this.startRun(RunInput.parse({...args,id:doc.id,revision:1}),doc)}
       case 'conversationPreset': {const workspace=await this.ctx.workspaceRegistry.create(await this.directory(args.cwd));return this.ctx.sessionController.create({workspaceId:workspace.id,agentPreset:z.string().parse(args.id)})}
       case 'run': return this.startRun(RunInput.parse(args))
@@ -192,7 +224,7 @@ export class StudioService {
         const workspace = await this.ctx.workspaceRegistry.create(await this.directory(args.cwd))
         return this.ctx.sessionController.create({ workspaceId: workspace.id, agentPreset: `wb-studio-${doc.id}` })
       })
-      case 'prompt': return this.startPrompt(z.object({ id: z.string().uuid(), instruction: z.string().min(1).max(20000), original: z.string().max(150000), definition: Definition }).strict().parse(args))
+      case 'prompt': return this.startPrompt(z.object({ id: z.string().uuid(), instruction: z.string().min(1).max(20000), original: z.string().max(150000), cwd: z.string().optional(), definition: Definition }).strict().parse(args))
       case 'getPrompt': { const p = this.domain.table('prompts').get(args.id); if (!p) throw error('Prompt not found'); return p }
       case 'stopPrompt': { const job = this.promptJobs?.get(args.id); job?.controller.abort(); if (job) await job.done; return this.domain.table('prompts').get(args.id) }
       default: throw error('Unknown operation', 'NOT_FOUND')
@@ -288,9 +320,9 @@ export class StudioService {
   }
   async startPrompt(input) {
     this.document(input.id)
-    const definition = this.selection(input.definition), controller = new AbortController()
+    const definition = this.selection((await this.capabilities({ ...this.document(input.id), definition: input.definition }, input.cwd ? await this.directory(input.cwd) : this.cwd)).definition), controller = new AbortController()
     const signal = AbortSignal.any([controller.signal, this.lifetime.signal])
-    const record = { id: randomUUID(), agentId: input.id, instruction:input.instruction, document:this.document(input.id), context: JSON.stringify({tools:input.definition.tools,skills:input.definition.skills}), original: input.original, candidate: '', status: 'running', createdAt: now() }
+    const record = { id: randomUUID(), agentId: input.id, instruction:input.instruction, document:this.document(input.id), context: JSON.stringify({tools:definition.tools,skills:definition.skills}), original: input.original, candidate: '', status: 'running', createdAt: now() }
     await this.domain.table('prompts').put(record.id, record)
     this.promptJobs ??= new Map()
     const done = (async () => {

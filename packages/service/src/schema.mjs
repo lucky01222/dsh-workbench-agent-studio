@@ -1,9 +1,9 @@
 import { z } from 'zod'
 const identity = z.string().uuid()
-import { Definition } from 'dsh-workbench-agent-studio-runtime/schema'
+import { Definition, CapabilityResolution } from 'dsh-workbench-agent-studio-runtime/schema'
 export { Definition }
 export const ConnectorSnapshot = z.object({version:z.literal('1.6.5'),actions:z.array(z.object({action:z.record(z.string(),z.unknown()),connection:z.object({id:z.string(),service:z.string(),alias:z.string(),label:z.string(),accountId:z.string(),authType:z.string(),scopes:z.array(z.string())}).optional()}))})
-export const Document = z.object({ runtime:z.object({source:z.string(),toolPresentation:z.enum(['native','ptc','both']).optional()}).optional(), connectorSnapshot: ConnectorSnapshot.optional(), readOnly: z.boolean().optional(), baseYaml: z.string().optional(), sourcePreset: z.string().optional(), id: identity, revision: z.number().int().positive(), definition: Definition, createdAt: z.string(), updatedAt: z.string(), deleted: z.boolean().optional() })
+export const Document = z.object({ capabilityResolution:CapabilityResolution.optional(), runtime:z.object({source:z.string(),toolPresentation:z.enum(['native','ptc','both']).optional()}).optional(), connectorSnapshot: ConnectorSnapshot.optional(), readOnly: z.boolean().optional(), baseYaml: z.string().optional(), sourcePreset: z.string().optional(), id: identity, revision: z.number().int().positive(), definition: Definition, createdAt: z.string(), updatedAt: z.string(), deleted: z.boolean().optional() })
 export const Tool = z.object({ id: z.string().min(1), name: z.string().min(1), arguments: z.string().max(200000), result: z.string().max(1000000).optional(), error: z.boolean().optional() }).strict()
 export const Message = z.object({ id: z.string().min(1), role: z.enum(['user', 'assistant']), text: z.string().max(1000000), tools: z.array(Tool).optional(), thinking: z.string().optional() }).strict()
 export const RunInput = z.object({ id: identity, revision: z.number().int().positive(), cwd: z.string().min(1), messages: z.array(Message).min(1).max(500), mode: z.enum(['model-only', 'tool-batch', 'react']), maxSteps: z.number().int().min(1).max(30).default(10) }).strict()

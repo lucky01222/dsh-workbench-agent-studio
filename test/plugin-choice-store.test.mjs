@@ -50,3 +50,12 @@ test('delete removes only the deleted Agent intent; inactive catalog preferences
   assert.equal(samePluginSelection(null, {}), true)
   assert.equal(samePluginSelection(choices, { ...choices, disabled: { enabled: false, mode: 'all', tools: ['other'] } }), true)
 })
+
+test('durable server bindings make matching browser sidecars ineligible even at the same revision and tool set', () => {
+  const { store } = setup()
+  store.write(doc(), '/workspace', choices)
+  const bound = { ...doc(), definition: { tools: ['read', 'write'], pluginBindings: {
+    '@deepseek-ai/dsh-tool-fs': { enabled: true, mode: 'custom', tools: ['read', 'write'] },
+  } } }
+  assert.equal(store.read(bound, '/workspace'), null)
+})

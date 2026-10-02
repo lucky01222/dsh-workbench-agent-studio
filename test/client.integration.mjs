@@ -20,30 +20,39 @@ test('prompt cancellation before start reply still stops remote job',async()=>{c
 test('reopened tab edits and undo work with the official immutable store',async()=>{const c=setup();c.edit([{id:'m',role:'user',text:'first'}]);await c.open('b');await c.open('a');c.edit([{id:'m',role:'user',text:'second'}]);c.undoMessages();assert.equal(c.getSnapshot().messages[0].text,'first');c.redoMessages();assert.equal(c.getSnapshot().messages[0].text,'second');c.dispose()})
 
 
-function pluginSetup() {
+function pluginSetup({capabilityBindings=false}={}) {
  const database = new Map([['a', { ...doc('a'), definition: { ...definition, tools: ['read'], skills: [] } }]])
  const values = new Map(), storage = { getItem: k => values.get(k), setItem: (k,v) => values.set(k,v), removeItem: k => values.delete(k) }
  const choices = new PluginChoiceStore({ storage: () => storage, origin: () => 'test-origin' })
- let catalog = [{ name:'read',description:'Read files' }], calls = [], nextSave
+ let catalog = [{ name:'read',description:'Read files',...(capabilityBindings?{pluginId:'@deepseek-ai/dsh-tool-fs'}:{}) }], calls = [], nextSave
  const api = async (method,args) => {
   calls.push({method,args})
-  if(method==='bootstrap')return {agents:[...database.values()],presets:[],cwd:'/workspace'}
+  if(method==='bootstrap')return {agents:[...database.values()],presets:[],cwd:'/workspace',...(capabilityBindings?{capabilityBindings:true}:{})}
   if(method==='models')return []
-  if(method==='catalog')return {tools:catalog,skills:[]}
+  if(method==='catalog')return {tools:catalog,skills:[],...(capabilityBindings?{capabilityBindings:true}:{})}
   if(method==='history')return {runs:[],evaluations:[]}
   if(method==='save'){
    Definition.parse(args.definition)
    if(nextSave){const value=nextSave;nextSave=null;await value.promise}
    const current=database.get(args.id)
    if(current.revision!==args.revision)throw Error('revision conflict')
-   const saved={...current,revision:current.revision+1,definition:structuredClone(args.definition)}
+   const savedDefinition=structuredClone(args.definition)
+   if(capabilityBindings&&savedDefinition.pluginBindings!==undefined){
+    const resolved=savedDefinition.tools.filter(name=>name.startsWith('openconnector/'))
+    for(const [id,choice] of Object.entries(savedDefinition.pluginBindings))if(choice.enabled){
+     const selected=choice.mode==='all'&&id!=='unassigned'?catalog.filter(row=>row.pluginId===id).map(row=>row.id||row.name):choice.tools
+     choice.tools=[...new Set(selected)];resolved.push(...selected)
+    }
+    savedDefinition.tools=[...new Set(resolved)]
+   }
+   const saved={...current,revision:current.revision+1,definition:savedDefinition}
    database.set(args.id,saved);return saved
   }
   if(method==='copy'){const current=database.get(args.id),saved={...structuredClone(current),id:'copy',revision:1};database.set('copy',saved);return saved}
   if(method==='delete'){database.delete(args.id);return}
   throw Error(method)
  }
- const make=()=>new StudioController(api,{choiceStore:choices})
+ const make=(options={})=>new StudioController(api,{choiceStore:choices,...options})
  return {database,choices,api,make,calls,setCatalog: rows=>catalog=rows,delaySave:d=>nextSave=d}
 }
 const fsId='@deepseek-ai/dsh-tool-fs'
@@ -56,6 +65,7 @@ test('frontend saves whole mode separately while the Host receives only its exis
  wholeFiles(c);assert.equal(c.getSnapshot().status,'dirty')
  await c.save();assert.equal(c.getSnapshot().status,'saved')
  const payload=f.calls.find(x=>x.method==='save').args.definition
+ assert.equal(f.calls.find(x=>x.method==='save').args.cwd,'/workspace')
  assert.deepEqual(payload.tools,['read']);assert.equal(Object.hasOwn(payload,'pluginSelection'),false)
  assert.equal(f.choices.read(f.database.get('a'),'/workspace')[fsId].mode,'all')
  const next=await opened(f);assert.equal(next.getSnapshot().pluginSelection[fsId].mode,'all')
@@ -88,6 +98,7 @@ test('copy and delete bind browser intent to the new identity and its final rena
  const f=pluginSetup(),c=await opened(f);wholeFiles(c);await c.save();await c.copy('renamed')
  assert.equal(c.getSnapshot().document.id,'copy');assert.equal(c.getSnapshot().document.revision,2)
  assert.equal(c.getSnapshot().pluginSelection[fsId].mode,'all')
+ assert.equal(f.calls.filter(call=>call.method==='save').at(-1).args.cwd,'/workspace')
  await c.remove();assert.equal(f.choices.read({id:'copy',revision:2,definition:{tools:['read']}},'/workspace'),null)
  assert.equal(f.choices.read(f.database.get('a'),'/workspace')[fsId].mode,'all')
  c.dispose()
@@ -110,5 +121,135 @@ test('restored tab plugin intent cannot cross a changed workspace even when serv
  assert.equal(c.getSnapshot().pluginSelection[fsId].mode,'custom')
  assert.deepEqual(c.getSnapshot().draft.tools,['read'])
  assert.equal(c.getSnapshot().pluginIntentWorkspace,'/other-workspace')
+ c.dispose()
+})
+
+test('new Host persists plugin intent on explicit save and a separate client restores it without browser sidecars',async()=>{
+ const f=pluginSetup({capabilityBindings:true}),c=await opened(f)
+ assert.equal(c.getSnapshot().capabilityBindings,true)
+ assert.equal(c.getSnapshot().pluginSelection[fsId].mode,'custom')
+ assert.equal(c.getSnapshot().status,'saved')
+ assert.equal(Object.hasOwn(c.getSnapshot().draft,'pluginBindings'),false)
+ wholeFiles(c);await c.save()
+ const payload=f.calls.find(call=>call.method==='save').args.definition
+ assert.equal(payload.pluginBindings[fsId].mode,'all')
+ assert.equal(f.database.get('a').definition.pluginBindings[fsId].mode,'all')
+ const broken=new PluginChoiceStore({storage:()=>({getItem:()=>null,setItem(){throw Error('quota')}})})
+ const other=f.make({choiceStore:broken});await other.refresh();await other.open('a')
+ assert.equal(other.getSnapshot().pluginSelection[fsId].mode,'all')
+ await other.save();assert.equal(other.getSnapshot().pluginStorageWarning,false)
+ c.dispose();other.dispose()
+})
+
+test('server bindings outrank a same-revision browser sidecar and later server edits replace a saved cached tab',async()=>{
+ const f=pluginSetup({capabilityBindings:true}),original=f.database.get('a')
+ f.choices.write(original,'/workspace',{[fsId]:{enabled:true,mode:'all',tools:['read']}})
+ original.definition={...original.definition,pluginBindings:{[fsId]:{enabled:true,mode:'custom',tools:['read']}}}
+ const c=await opened(f)
+ assert.equal(c.getSnapshot().pluginSelection[fsId].mode,'custom')
+ const newer={...original,revision:2,definition:{...original.definition,pluginBindings:{[fsId]:{enabled:true,mode:'all',tools:['read']}}}}
+ f.database.set('a',newer)
+ await c.refresh();await c.open('a')
+ assert.equal(c.getSnapshot().document.revision,2)
+ assert.equal(c.getSnapshot().pluginSelection[fsId].mode,'all')
+ const other=await opened(f);assert.equal(other.getSnapshot().pluginSelection[fsId].mode,'all')
+ c.dispose();other.dispose()
+})
+
+test('a valid frontend sidecar migrates only when the user saves on the new Host',async()=>{
+ const f=pluginSetup({capabilityBindings:true})
+ f.choices.write(f.database.get('a'),'/workspace',{[fsId]:{enabled:true,mode:'all',tools:['read']}})
+ const c=await opened(f);assert.equal(c.getSnapshot().pluginSelection[fsId].mode,'all')
+ await c.refreshCatalog()
+ assert.equal(f.calls.some(call=>call.method==='save'),false)
+ assert.equal(f.database.get('a').definition.pluginBindings,undefined)
+ await c.save()
+ assert.equal(f.database.get('a').definition.pluginBindings[fsId].mode,'all')
+ c.dispose()
+})
+
+test('new authoritative registrations refresh an all-mode draft without writes or model execution',async()=>{
+ const id='research-plugin',f=pluginSetup({capabilityBindings:true}),d=f.database.get('a')
+ d.definition={...d.definition,tools:['lookup_a'],pluginBindings:{[id]:{enabled:true,mode:'all',tools:['lookup_a']}}}
+ f.setCatalog([{name:'lookup_a',description:'Lookup A',pluginId:id,pluginVersion:'1.0.0'}])
+ const c=await opened(f)
+ f.setCatalog([{name:'lookup_a',description:'Lookup A',pluginId:id,pluginVersion:'1.1.0'},{name:'find_b',description:'Find B',pluginId:id,pluginVersion:'1.1.0'}])
+ await c.refreshCatalog()
+ assert.deepEqual(c.getSnapshot().draft.tools,['lookup_a','find_b'])
+ assert.equal(c.getSnapshot().pluginSelection[id].mode,'all')
+ assert.equal(c.getSnapshot().status,'dirty')
+ assert.equal(f.calls.some(call=>['save','run','conversation'].includes(call.method)),false)
+ await c.save()
+ assert.deepEqual(c.getSnapshot().draft.pluginBindings[id].tools,['lookup_a','find_b'])
+ assert.equal(c.getSnapshot().status,'saved')
+ c.dispose()
+})
+
+test('save merges server-expanded tools while retaining a concurrent prompt edit',async()=>{
+ const f=pluginSetup({capabilityBindings:true}),d=f.database.get('a')
+ d.definition={...d.definition,pluginBindings:{[fsId]:{enabled:true,mode:'all',tools:['read']}}}
+ const c=await opened(f),pending=deferred();f.delaySave(pending);const saving=c.save()
+ c.change({systemPrompt:'concurrent prompt'})
+ f.setCatalog([{name:'read',description:'',pluginId:fsId},{name:'write',description:'',pluginId:fsId}])
+ pending.resolve();await saving
+ assert.equal(c.getSnapshot().draft.systemPrompt,'concurrent prompt')
+ assert.deepEqual(c.getSnapshot().draft.tools,['read','write'])
+ assert.equal(c.getSnapshot().draft.pluginBindings[fsId].mode,'all')
+ assert.equal(c.getSnapshot().status,'dirty')
+ c.dispose()
+})
+
+test('a mode edit during save remains exact even when the server response expands the previous all mode',async()=>{
+ const f=pluginSetup({capabilityBindings:true}),d=f.database.get('a')
+ d.definition={...d.definition,pluginBindings:{[fsId]:{enabled:true,mode:'all',tools:['read']}}}
+ const c=await opened(f),pending=deferred();f.delaySave(pending);const saving=c.save()
+ c.changePlugins(setPluginMode(c.getSnapshot().pluginSelection,c.pluginCatalog().find(plugin=>plugin.id===fsId),'custom'))
+ f.setCatalog([{name:'read',description:'',pluginId:fsId},{name:'write',description:'',pluginId:fsId}])
+ pending.resolve();await saving
+ assert.deepEqual(c.getSnapshot().document.definition.tools,['read','write'])
+ assert.equal(c.getSnapshot().document.definition.pluginBindings[fsId].mode,'all')
+ assert.deepEqual(c.getSnapshot().draft.tools,['read'])
+ assert.equal(c.getSnapshot().pluginSelection[fsId].mode,'custom')
+ assert.equal(c.getSnapshot().draft.pluginBindings[fsId].mode,'custom')
+ assert.equal(c.getSnapshot().status,'dirty')
+ c.dispose()
+})
+
+test('catalog reconciliation accepts a newer server configuration when there are no local edits',async()=>{
+ const f=pluginSetup({capabilityBindings:true}),old=f.database.get('a')
+ old.definition={...old.definition,pluginBindings:{[fsId]:{enabled:true,mode:'all',tools:['read']}}}
+ const c=await opened(f)
+ f.database.set('a',{...old,revision:2,definition:{...old.definition,tools:['write'],pluginBindings:{[fsId]:{enabled:true,mode:'custom',tools:['write']}}}})
+ f.setCatalog([{name:'read',description:'',pluginId:fsId},{name:'write',description:'',pluginId:fsId}])
+ await c.refresh();await c.refreshCatalog()
+ assert.equal(c.getSnapshot().document.revision,2)
+ assert.deepEqual(c.getSnapshot().draft.tools,['write'])
+ assert.equal(c.getSnapshot().pluginSelection[fsId].mode,'custom')
+ assert.equal(c.getSnapshot().status,'saved')
+ c.dispose()
+})
+
+test('a newer server binding does not merge or replace an unsaved local exact scope',async()=>{
+ const f=pluginSetup({capabilityBindings:true}),old=f.database.get('a')
+ old.definition={...old.definition,pluginBindings:{[fsId]:{enabled:true,mode:'all',tools:['read']}}}
+ const c=await opened(f)
+ c.changePlugins(setPluginMode(c.getSnapshot().pluginSelection,c.pluginCatalog().find(plugin=>plugin.id===fsId),'custom'))
+ f.database.set('a',{...old,revision:2,definition:{...old.definition,tools:['write'],pluginBindings:{[fsId]:{enabled:true,mode:'custom',tools:['write']}}}})
+ f.setCatalog([{name:'read',description:'',pluginId:fsId},{name:'write',description:'',pluginId:fsId}])
+ await c.refresh();await c.refreshCatalog()
+ assert.deepEqual(c.getSnapshot().draft.tools,['read'])
+ assert.equal(c.getSnapshot().document.revision,1)
+ assert.equal(c.getSnapshot().status,'conflict')
+ assert.equal(c.getSnapshot().pluginSelection[fsId].mode,'custom')
+ await assert.rejects(c.save(),/revision conflict/)
+ c.dispose()
+})
+
+test('prompt generation sends the currently selected work directory for capability and Skill validation',async()=>{
+ let received
+ const c=setup({prompt:args=>{received=args;return {id:'prompt-id',candidate:'candidate'}}})
+ c.publish({cwd:'/selected-project'})
+ await c.prompt({id:'local-id',model:{provider:'test',model:'test'},original:'old',instruction:'improve'})
+ assert.equal(received.cwd,'/selected-project')
  c.dispose()
 })

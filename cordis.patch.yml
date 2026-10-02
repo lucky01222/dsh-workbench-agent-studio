@@ -1,5 +1,14 @@
-# One application switch; service owns data and jobs, UI owns route and browser slots.
+# Observe registrations through the official ToolRuntime before tool plugins start.
+- id: tools
+  name: "@deepseek-ai/dsh-tools"
+  disabled: true
+
+# The snapshot owner outlives preset generations and closes after policy consumers.
 - insert:
+    - id: studio-tool-registry
+      name: dsh-workbench-agent-studio-runtime/tool-registry
+    - id: studio-capability-snapshots
+      name: dsh-workbench-agent-studio-runtime/snapshots
     - id: workbench-agent-studio-service
       name: dsh-workbench-agent-studio-service
     - id: workbench-agent-studio

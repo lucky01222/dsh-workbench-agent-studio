@@ -126,9 +126,9 @@ components:
 
 这是现有 Agent 工作室的局部延伸。浅紫灰层级、紧凑中文信息行和明确的选择状态延续既有工作台；配置、提示词、Skills 与试运行位置保持可辨认。生产界面的共享控件与 `--dsw-*` 语义 tokens 是权威，前置值记录实际变量引用，不复制原型硬编码色表。
 
-记录日期：2026-10-02，生产前端候选 1.9.0。样式来源为 [PluginPicker](src/client/PluginPicker.module.css)、[配置摘要](src/client/PluginCapabilitySummary.module.css)、[Workbench](src/client/Workbench.module.css)、[Button](src/client/Button.module.css) 和 [Pill](src/client/Pill.module.css)；Input / Modal 由官方同版 `@deepseek-ai/dsh-client-ui-primitives` 提供。范围以 [PRODUCT.md](PRODUCT.md) 为准。批准的 [Superdesign 原型 version 2](https://p.superdesign.dev/draft/13358642-bb06-4c8c-afe7-43a60501d7b4) 保留为交互参考，当前生产源码和原生控件决定实现细节。
+记录日期：2026-10-02，前端布局基线 1.9.0，后端对接候选 1.10.0。样式来源为 [PluginPicker](src/client/PluginPicker.module.css)、[配置摘要](src/client/PluginCapabilitySummary.module.css)、[Workbench](src/client/Workbench.module.css)、[Button](src/client/Button.module.css) 和 [Pill](src/client/Pill.module.css)；Input / Modal 由官方同版 `@deepseek-ai/dsh-client-ui-primitives` 提供。范围以 [PRODUCT.md](PRODUCT.md) 为准。批准的 [Superdesign 原型 version 2](https://p.superdesign.dev/draft/13358642-bb06-4c8c-afe7-43a60501d7b4) 保留为交互参考，当前生产源码和原生控件决定实现细节。
 
-[亮色桌面](../../.impeccable/review/frontend/desktop.jpg)、[暗色桌面](../../.impeccable/review/frontend/desktop-dark.jpg)、[窄屏列表](../../.impeccable/review/frontend/mobile.jpg)、[窄屏明细](../../.impeccable/review/frontend/mobile-detail.jpg)、[配置页](../../.impeccable/review/frontend/configuration.jpg) 记录真实宿主前端。保存已接入现有严格 `tools[]` 接口；选择意图的浏览器桥接不是跨客户端后端持久绑定。截图及前端操作验证不证明真实模型执行或后端整组持续跟随已完成。
+[亮色桌面](../../.impeccable/review/frontend/desktop.jpg)、[暗色桌面](../../.impeccable/review/frontend/desktop-dark.jpg)、[窄屏列表](../../.impeccable/review/frontend/mobile.jpg)、[窄屏明细](../../.impeccable/review/frontend/mobile-detail.jpg)、[配置页](../../.impeccable/review/frontend/configuration.jpg) 记录真实宿主前端。上述截图记录前端阶段样式。1.10.0 已接入服务端 `pluginBindings` 与实际注册归属；整组解析和会话快照另由后端集成验证，不依据截图认定运行通过。
 
 **Key Characteristics:**
 
@@ -222,6 +222,6 @@ components:
 
 ### Don't:
 
-- **Don't** 把浏览器选择意图桥接写成跨客户端后端持久绑定或整组持续跟随已交付。
+- **Don't** 让旧浏览器选择覆盖服务端绑定，或把目录刷新视为自动保存和运行。
 - **Don't** 把原型硬编码颜色、永久厚焦点圈或截图滚动位置固化为生产规则。
 - **Don't** 为这一局部扩展引入独立品牌、卡片矩阵、装饰性字体或额外入场动画。

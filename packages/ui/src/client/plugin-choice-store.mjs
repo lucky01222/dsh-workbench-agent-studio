@@ -6,6 +6,9 @@ const selectionKey = selection => JSON.stringify(Object.entries(clonePluginSelec
   .filter(([, choice]) => choice.enabled)
   .sort(([a], [b]) => a.localeCompare(b))
   .map(([id, choice]) => [id, choice.mode, [...choice.tools].sort()]))
+const bindingKey = definition => definition?.pluginBindings === undefined ? null
+  : JSON.stringify(Object.entries(clonePluginSelection(definition.pluginBindings)).sort(([a],[b]) => a.localeCompare(b))
+    .map(([id,choice]) => [id,choice.enabled,choice.mode,[...choice.tools].sort()]))
 
 /** Compare intent rather than object order or disabled catalog presentation. */
 export const samePluginSelection = (a, b) => selectionKey(a) === selectionKey(b)
@@ -13,6 +16,7 @@ export const samePluginSelection = (a, b) => selectionKey(a) === selectionKey(b)
 export function samePluginBaseline(a, b) {
   return !!a && !!b && a.id === b.id && a.revision === b.revision
     && JSON.stringify(toolsOf(a)) === JSON.stringify(toolsOf(b))
+    && bindingKey(a.definition) === bindingKey(b.definition)
 }
 
 function validSelection(value) {
@@ -25,8 +29,8 @@ function validSelection(value) {
 }
 
 /**
- * Browser-only bridge for the frontend phase. Server definitions and historical
- * runs retain their existing strict tools[] protocol. Records are accepted only
+ * Migration bridge for Hosts/documents without durable plugin bindings.
+ * Server bindings take precedence whenever present. Records are accepted only
  * against the same server revision and tool set, never as authority over a newer
  * document supplied by another window or client.
  */
@@ -42,7 +46,7 @@ export class PluginChoiceStore {
   }
 
   read(document, workspace) {
-    if (!document || document.readOnly) return null
+    if (!document || document.readOnly || document.definition?.pluginBindings !== undefined) return null
     try {
       const record = JSON.parse(this.storage()?.getItem(this.key(workspace, document.id)) || 'null')
       if (!record || record.schemaVersion !== 1 || record.agentId !== document.id

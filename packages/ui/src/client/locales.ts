@@ -5,6 +5,7 @@ export const NS = 'agent-studio'
 export const zh = {
   ...pluginCapabilitiesZh,
   pluginFrontendHint:'插件选择方式保存在当前浏览器。运行前请刷新并保存工具范围。',
+  pluginServerHint:'选择随 Agent 保存；整组模式在新任务开始时更新，已开始任务保持原范围。',
   pluginStorageWarning:'工具配置已保存，浏览器未能保存插件选择方式。重新打开时会恢复为自定义范围。',
   pluginDirectoryWarning:'暂时无法读取插件安装状态，当前工具目录仍可使用。',
   pluginOfficialPartial:'官方基础能力 · 部分启用',
@@ -83,6 +84,7 @@ export const zh = {
 export type Key = keyof typeof zh
 /** English editor copy. */
 export const en: Record<Key, string> = {
+  pluginServerHint:'Choices are saved with the Agent. Full plugins refresh when a new task starts; tasks already started keep their tool scope.',
   startConversation: 'Start a conversation with this Agent',
   allowAutoInvocation: 'Allow automatic invocation', autoInvocationHint: 'The coordinator may select this Agent by its purpose. Runs use its saved configuration.', autoInvocationDescription: 'Describe its purpose before allowing automatic invocation.',
   connectorTab: 'External tools · OpenConnector',
