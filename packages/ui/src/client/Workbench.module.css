@@ -184,3 +184,15 @@
 @media (prefers-reduced-motion:reduce) { .separator::before { transition:none; } }
 
 .documentBar .tabs::-webkit-scrollbar { display:none; }
+
+/* Plugin capability projection reuses the configuration rows and error disclosure. */
+.pluginWarning { margin:8px 0 0; font-size:12px; line-height:1.7; color:var(--dsw-alias-label-secondary); }
+.pluginWarning summary { cursor:pointer; }
+.pluginWarning p { margin:6px 0 0; overflow-wrap:anywhere; }
+.pluginCheck { min-width:0; max-height:60dvh; overflow:auto; }
+.pluginCheckRow { display:flex; flex-wrap:wrap; gap:8px; padding:12px 0; border-bottom:.5px solid var(--dsw-alias-border-l3); font-size:13px; }
+.pluginCheckRow > strong { flex:1; font-weight:500; }
+.pluginCheckRow > span { font-size:12px; color:var(--dsw-alias-label-secondary); }
+.pluginCheckRow > p,.pluginCheckRow > details { flex-basis:100%; margin:0; }
+.pluginCheckRow summary { font-size:12px; color:var(--dsw-alias-label-secondary); cursor:pointer; }
+.pluginCheckRow pre { margin:8px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.7 var(--dsw-font-mono,monospace); }

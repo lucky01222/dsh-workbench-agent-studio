@@ -14,8 +14,13 @@ import { TrialToolbar } from './TrialToolbar.tsx'
 import { HistoryPane } from './HistoryPane.tsx'
 import { RecordsPane } from './RecordsPane.tsx'
 import css from './Workbench.module.css'
+import { PluginPicker } from './PluginPicker.tsx'
+import { PluginCapabilitySummary } from './PluginCapabilitySummary.tsx'
+import { buildPluginCatalog, clonePluginSelection, selectionFromTools, chosenPluginTools, summarizePluginSelection } from './plugin-capabilities.mjs'
+import type { PluginCapability, PluginSelection } from './plugin-capabilities.types.ts'
+import type { Key } from './locales.ts'
 
-type Dialog = 'create' | 'tools' | 'skills' | 'delete' | 'reload' | null
+type Dialog = 'create' | 'tools' | 'skills' | 'plugins' | 'capability-check' | 'delete' | 'reload' | null
 
 function OperationError({ error, t }: { error: string | null; t: WorkbenchProps['t'] }) {
   return error ? <div className={css.dialogError} role="alert"><span>{t('errorTitle')}</span>
@@ -23,8 +28,9 @@ function OperationError({ error, t }: { error: string | null; t: WorkbenchProps[
   </div> : null
 }
 /** Render the managed Agent editor with framework-derived state and actions. */
-export function Workbench(props: WorkbenchProps) {
+export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly PluginCapability[]; changePluginSelection?: (selection: PluginSelection) => void }) {
   const state = props.useEditor(s => s), view = props.useStore(s => s), records = props.useRecords(s => s), { t } = props
+  const [pluginDetailId, setPluginDetailId] = useState<string | undefined>();
   const [dialog, setDialog] = useState<Dialog>(null), [search, setSearch] = useState(''), [newName, setNewName] = useState('')
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const [startingConversation, setStartingConversation] = useState(false), [actionError, setActionError] = useState<string | null>(null)
@@ -43,6 +49,13 @@ export function Workbench(props: WorkbenchProps) {
   const pendingInteraction = props.useSessionPendingInteraction(s => diagnostic ? s.get(diagnostic.run.sessionId) : undefined)
   const draft = state.draft
   const readOnly = state.document?.readOnly === true, runtime = state.document?.runtime
+  const plugins = props.pluginCatalog ?? buildPluginCatalog(state.catalog?.tools ?? [])
+  const pluginSelection: PluginSelection = state.pluginSelection ?? selectionFromTools(draft?.tools ?? [], plugins)
+  const pluginT = (key: string, values?: Record<string, string | number>) => t(key as Key, values)
+  const pluginSummary = summarizePluginSelection(pluginSelection, plugins)
+  const openPlugins = (pluginId?: string) => { setPluginDetailId(pluginId); openDialog('plugins') }
+  const changePlugins = (selection: PluginSelection) => { if (props.changePluginSelection) props.changePluginSelection(selection) }
+  const removePlugins = (ids: readonly string[]) => { const next = clonePluginSelection(pluginSelection); for (const pluginId of ids) if (next[pluginId]) next[pluginId].enabled = false; changePlugins(next) }
   const groups = [{ label: 'agents' as const, rows: state.roster.presets.filter(row => row.managed) },
     { label: 'builtinAgents' as const, rows: state.roster.presets.filter(row => row.builtIn) }]
   const canRunModel = draft?.modelSelection === 'global' ? !!state.models?.default : !!draft?.provider && !!draft.model
@@ -57,7 +70,7 @@ export function Workbench(props: WorkbenchProps) {
   }
   const openDialog = (next: Dialog) => {
     props.clearError(); setSearch(''); setCategory('all'); setDialog(next)
-    if ((next === 'tools' || next === 'skills') && !state.catalog && !state.catalogLoading) invoke(props.refreshCatalog())
+    if ((next === 'tools' || next === 'skills' || next === 'plugins') && !state.catalog && !state.catalogLoading) invoke(props.refreshCatalog())
   }
   const selectRuns = (ids: readonly import('@deepseek-ai/dsh-api-agent-studio-controller/types').StudioRunId[]) => { props.actions.update({ selectedRunIds: [...ids] }); invoke(props.loadResults(ids)) }
   const shown = dialog === 'skills' ? state.catalog?.skills : state.catalog?.tools.filter(tool => tool.source !== 'openconnector')
@@ -181,22 +194,24 @@ export function Workbench(props: WorkbenchProps) {
               {!canRunModel && <p className={css.hint}>{t('modelRequired')}</p>}
               {draft.modelSelection === 'global' && state.models?.default && <p className={css.hint}>{state.models.default.provider} / {state.models.default.model}</p>}
               {model?.reasoning && <div className={css.field}><label htmlFor={`${id}-effort`}>{t('reasoning')}</label><select disabled={readOnly} id={`${id}-effort`} className={css.select} value={draft.reasoningEffort ?? ''} onChange={(event) => { props.changeDefinition({ reasoningEffort: event.currentTarget.value || undefined }) }}><option value="">{t('defaultEffort')}</option>{model.reasoning.efforts.map(effort => <option key={effort.id} value={effort.id}>{effort.name}</option>)}</select></div>}
-              <div className={css.capabilities}>{(['tools', 'skills'] as const).map(kind => <div className={css.capability} key={kind}>
-                <label>{t(kind)}</label><div className={css.chips}>
-                  {draft[kind].length ? draft[kind].map((name) => {
-                    const label = kind === 'tools' ? state.catalog?.tools.find(tool => optionId(tool) === name)?.name ?? name : name
-                    const removeLabel = t(kind === 'tools' ? 'removeTool' : 'removeSkill', { name: label })
-                    const removesSkills = kind === 'tools' && (name === 'skill' || name === 'skills/skill') && draft.skills.length > 0
-                    return <Pill appearance="tag" key={name} title={label} onClick={() => { openDialog(kind) }}
-                      {...!readOnly ? { removal: { label: removeLabel, title: removesSkills ? t('removeSkillLoaderHint') : removeLabel,
-                        onRemove: () => { props.changeDefinition({ [kind]: draft[kind].filter(value => value !== name) }) } } } : {}}>
-                      {label}
-                    </Pill>
-                  }) : <span className={css.muted}>{t('none')}</span>}
-                  <Button size="sm" icon={readOnly ? undefined : <IconPlusOutline16 />} onClick={() => { openDialog(kind) }}>{t(readOnly ? 'viewCapabilities' : 'add')}</Button>
-                </div>
-              </div>)}</div>
-              {runtime && state.catalog?.tools.some(tool => tool.source === 'host') && <p className={css.hint}>{t('hostToolsHint')}</p>}
+              <div className={css.capabilities}>
+                <div className={css.capability}><label>{t('pluginCapabilitiesLabel')}</label><div>
+                  <PluginCapabilitySummary catalog={plugins} selection={pluginSelection} readOnly={readOnly} loading={state.catalogLoading}
+                    t={pluginT} onOpen={openPlugins} onRemove={removePlugins} />
+                  {!readOnly && <p className={css.hint}>{t(state.capabilityBindings ? 'pluginServerHint' : 'pluginFrontendHint')}</p>}
+                  {state.pluginStorageWarning && <p className={css.hint} role="status">{t('pluginStorageWarning')}</p>}
+                  {state.pluginDirectoryError && <details className={css.pluginWarning}><summary>{t('pluginDirectoryWarning')}</summary><p>{state.pluginDirectoryError}</p></details>}
+                </div></div>
+                <div className={css.capability}><label>{t('skills')}</label><div className={css.chips}>
+                  {draft.skills.length ? draft.skills.map(name => <Pill appearance="tag" key={name} title={name} onClick={() => { openDialog('skills') }}
+                    {...!readOnly ? { removal: { label: t('removeSkill', { name }), onRemove: () => { props.changeDefinition({ skills: draft.skills.filter(value => value !== name) }) } } } : {}}>{name}</Pill>) : <span className={css.muted}>{t('none')}</span>}
+                  <Button size="sm" icon={readOnly ? undefined : <IconPlusOutline16 />} onClick={() => { openDialog('skills') }}>{t(readOnly ? 'viewCapabilities' : 'add')}</Button>
+                </div></div>
+                {(draft.tools.some(name => name.startsWith('openconnector/')) || state.catalog?.tools.some(tool => tool.source === 'openconnector')) && <div className={css.capability}><label>{t('connectorTab')}</label><div className={css.chips}>
+                  <span className={css.muted}>{t('pluginExternalSummary', { count: draft.tools.filter(name => name.startsWith('openconnector/')).length })}</span>
+                  <Button size="sm" onClick={() => { setToolSource('openconnector'); openDialog('tools') }}>{t(readOnly ? 'viewCapabilities' : 'add')}</Button>
+                </div></div>}
+              </div>
               <PromptWriter writer={props.promptWriter} editor={state} label={t(runtime ? 'rolePrompt' : 'prompt')} hint={t(runtime ? 'presetPromptHint' : 'promptHint')} placeholder={t('promptPlaceholder')} t={props.promptT} onChange={(systemPrompt) => { props.changeDefinition({ systemPrompt }) }} />
               <details className={css.metadata}><summary>{t('agentDetails')}</summary>
                 <div className={css.field}><label htmlFor={`${id}-name`}>{t('name')}</label><Input readOnly={readOnly} id={`${id}-name`} maxLength={120} value={draft.name} onChange={(event) => { props.changeDefinition({ name: event.currentTarget.value }) }} /></div>
@@ -213,7 +228,7 @@ export function Workbench(props: WorkbenchProps) {
           </section>
           <div className={css.separator} role="separator" tabIndex={0} aria-label={t('resize')} aria-orientation="vertical" aria-valuemin={30} aria-valuemax={70} aria-valuenow={view.split} title={t('resizeHint', { percent: Math.round(view.split) })} onDoubleClick={() => { props.actions.update({ split: 50 }) }} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); props.actions.update({ split: Math.max(30, Math.min(70, view.split + (event.key === 'ArrowRight' ? 2 : -2))) }) } }} onPointerDown={(event) => { if(event.button !== 0)return;event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);event.currentTarget.dataset.dragging='true' }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { const rect = splitRef.current?.getBoundingClientRect(); if (rect) props.actions.update({ split: Math.max(30, Math.min(70, (event.clientX - rect.left) / rect.width * 100)) }) } }} onPointerUp={(event) => { delete event.currentTarget.dataset.dragging;if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }} onLostPointerCapture={event=>{delete event.currentTarget.dataset.dragging}} onPointerCancel={event=>{delete event.currentTarget.dataset.dragging}} />
           <section className={css.right}>
-            <header className={css.paneHeader}><strong className={css.heading}>{t(view.rightTab === 'history' ? 'history' : 'trial')}</strong>
+            <header className={css.paneHeader}><strong className={css.heading}>{t(view.rightTab === 'history' ? 'history' : 'trial')}</strong><Button size="sm" disabled={!draft} onClick={() => { setDialog('capability-check') }}>{t('pluginCheckAction')}</Button>
               <TrialToolbar toolsRunning={state.executingToolIds.length > 0} runState={state.runState} input={state.input} busy={state.busy} canRun={!state.executingToolIds.length && state.status !== 'conflict' && canRunModel && !!state.cwd.trim()} onRun={() => { props.actions.update({ rightTab: 'trial', panel: 'trial' }); invoke(props.startRun()) }} onStop={() => { invoke(props.stopRun()) }} t={props.trialT} settings={state.settings} onSettingsChange={props.changeSettings} undoable={state.undoable} redoable={state.redoable} onUndo={props.undoMessages} onRedo={props.redoMessages} onClear={props.clearRun} onShowHistory={() => { props.actions.update({ rightTab: 'history' }); invoke(props.refreshHistory()) }} />
             </header>
             <nav className={css.rightTabs} hidden={view.rightTab === 'trial'}><Pill active={view.rightTab === 'trial'} onClick={() => { props.actions.update({ rightTab: 'trial' }) }}>{t('trial')}</Pill><Pill active={view.rightTab === 'history'} onClick={() => { props.actions.update({ rightTab: 'history' }); invoke(props.refreshHistory()) }}>{t('history')}</Pill></nav>
@@ -223,6 +238,21 @@ export function Workbench(props: WorkbenchProps) {
       </>}
     </main>
     <Modal open={dialog === 'create'} title={t('create')} closeLabel={t('close')} onClose={() => { setDialog(null) }}><form className={css.dialogBody} onSubmit={(event) => { event.preventDefault(); void props.createAgent(newName.trim()).then(() => { setDialog(null); setNewName('') }).catch(() => {}) }}><p className={css.hint}>{t('createHint')}</p><label htmlFor={`${id}-new-name`}>{t('name')}</label><Input id={`${id}-new-name`} autoFocus required maxLength={120} value={newName} onChange={(event) => { setNewName(event.currentTarget.value) }} /><OperationError error={state.error} t={t} /><div className={css.dialogActions}><Button onClick={() => { setDialog(null) }}>{t('cancel')}</Button><Button type="submit" variant="primary" disabled={state.busy || !newName.trim()}>{t('createAction')}</Button></div></form></Modal>
+    <PluginPicker open={dialog === 'plugins'} catalog={plugins} selection={pluginSelection} readOnly={readOnly}
+      loading={state.catalogLoading} error={state.error} initialPluginId={pluginDetailId} selectedSkills={draft?.skills ?? []}
+      t={pluginT} onRefresh={() => { invoke(props.refreshCatalog()) }} onClose={() => { setDialog(null) }}
+      onComplete={selection => { changePlugins(selection); setDialog(null) }} />
+    <Modal open={dialog === 'capability-check'} title={t('pluginCheckTitle')} closeLabel={t('close')} onClose={() => { setDialog(null) }}
+      footer={<Button variant="primary" onClick={() => { setDialog(null) }}>{t('close')}</Button>}>
+      <div className={css.pluginCheck}><p className={css.hint}>{t('pluginCheckHint')}</p><p className={css.hint}>{t('pluginPickerSummary', { plugins: pluginSummary.plugins, tools: pluginSummary.tools })}</p>
+        {plugins.filter(plugin => pluginSelection[plugin.id]?.enabled).map(plugin => <section key={plugin.id} className={css.pluginCheckRow}>
+          <strong>{plugin.nameKey ? pluginT(plugin.nameKey) : plugin.name}</strong><span>{t('pluginPickerToolCount', { count: chosenPluginTools(plugin, pluginSelection).length })}</span>
+          {plugin.reasonKey && <p className={css.hint}>{pluginT(plugin.reasonKey)}</p>}
+          {plugin.requiresContext && <p className={css.hint}>{t('pluginPickerContext', { context: plugin.requiresContext })}</p>}
+          <details><summary>{t('pluginCheckTools')}</summary><pre>{chosenPluginTools(plugin, pluginSelection).map(tool => tool.name).join('\n')}</pre></details>
+        </section>)}
+      </div>
+    </Modal>
     <Modal open={dialog === 'tools' || dialog === 'skills'} className={clsx(dialog === 'tools' ? css.catalogDialog : css.skillsDialog)} {...dialog === 'tools' ? { contentClassName: css.catalogContent } : {}} footer={<>{!(dialog === 'tools' && toolSource === 'openconnector') && <Button disabled={state.catalogLoading || !state.cwd.trim()} onClick={() => { void props.refreshCatalog().catch(() => {}) }}>{t('refreshCatalog')}</Button>}<Button variant="primary" onClick={() => { setDialog(null) }}>{t('close')}</Button></>} title={t(dialog === 'skills' ? 'selectSkills' : 'selectTools')} description={t(dialog === 'skills' ? 'skillsHint' : 'selectHint')} closeLabel={t('close')} onClose={() => { setDialog(null) }}>
       <div className={css.dialogBody}>
         {state.connectorAvailable && dialog === 'tools' && <nav className={css.connectorActions} aria-label={t('toolSource', { source: '' })}><Pill active={toolSource === 'local'} onClick={() => { setToolSource('local') }}>{t('localToolsTab')}</Pill><Pill active={toolSource === 'openconnector'} onClick={() => { setToolSource('openconnector') }}>{t('connectorTab')}</Pill></nav>}

@@ -41,6 +41,8 @@ function setup() {
       effect(callback) { const dispose = callback(); if (typeof dispose === 'function') disposers.push(dispose) },
       locale: { register() {}, bind: () => () => '' },
       slots: { inject() {} },
+      on() { return () => {} },
+      remote: { $on() { return () => {} }, pluginInventory: { list: async () => ({ ok: true, value: { managementAvailable: false, entries: [] } }) }, pluginManager: { listBundles: async () => ({ ok: true, value: [] }) } },
     })
     return () => { for (const dispose of disposers.reverse()) dispose() }
   }

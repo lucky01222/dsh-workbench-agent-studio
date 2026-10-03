@@ -1,6 +1,6 @@
 # DSH Agent Studio
 
-适用于官方 DeepSeek Harness Web **0.1.7-rc.2** 的 Agent 工作室。支持 Agent 配置、多标签草稿、内置预设复制、模型/工具/Skill 选择、提示词编辑、试运行、工具结果编辑及运行历史。
+适用于官方 DeepSeek Harness Web **0.1.7-rc.2** 的 Agent 工作室。支持 Agent 配置、多标签草稿、内置预设复制、模型、插件能力与 Skill 选择、提示词编辑、试运行、工具结果编辑及运行历史。
 
 ## 安装
 
@@ -8,7 +8,7 @@
 
 ```sh
 export DSH_HOME=/absolute/path/to/your-dsh-home
-dsh plugin --profile web add /absolute/path/dsh-workbench-agent-studio-1.8.5.tgz --ignore-scripts --offline
+dsh plugin --profile web add /absolute/path/dsh-workbench-agent-studio-1.10.0.tgz --ignore-scripts --offline
 dsh web --host 127.0.0.1 --port 3184
 ```
 
@@ -21,7 +21,7 @@ dsh web --host 127.0.0.1 --port 3184
 | `dsh-workbench-agent-studio` | 安装组合与旧 `/policy` 兼容入口 | Profile bundle |
 | `dsh-workbench-agent-studio-service` | Agent 文档、版本、试运行、历史和评价 | Host |
 | `dsh-workbench-agent-studio-ui` | Web 编辑器和认证 HTTP 适配 | Host / Client |
-| `dsh-workbench-agent-studio-runtime` | 模型、提示词、工具和 Skill 范围策略 | Preset |
+| `dsh-workbench-agent-studio-runtime` | 注册来源、会话快照及模型/提示词/能力范围策略 | Host / Preset |
 
 服务通过 `ctx.agentStudio` 提供 `apiVersion = 1` 的受信任 Host API。调用方声明 `inject: ['agentStudio']`；方法白名单见 service 包的 `/protocol` 出口。该 API 不自动暴露为模型工具。
 
@@ -49,7 +49,21 @@ npm run pack:release -- ./release
 
 `DSH_RUNTIME_ROOT` 指向安装有官方 Harness `node_modules` 的目录。`check` 为 JavaScript 语法检查，不是全量 TypeScript 检查。测试夹具的使用方式见 `test/fixtures/README.md`。
 
-发布目录中的 `dsh-workbench-agent-studio-1.8.5.tgz` 是完整安装包，其余三个 tgz 用于单独分发组件。第三方许可证见 `THIRD_PARTY_NOTICES.md`。
+发布目录中的 `dsh-workbench-agent-studio-1.10.0.tgz` 是完整安装包，其余三个 tgz 用于单独分发组件。第三方许可证见 `THIRD_PARTY_NOTICES.md`。
+
+## 1.10.0 插件能力绑定
+
+工作室按插件选择工具，官方能力可以一次组合开启。目录归属来自实际注册工具的插件及 Bundle，不按工具名称前缀推断；动态注册、子入口和多个配置实例都会合入实际所属插件。没有可靠归属的工具保留精确选择。
+
+Agent 的 `definition.pluginBindings` 持久保存插件开关、`all`/`custom` 模式和已选工具。`all` 在新任务启动时纳入插件新增工具；`custom` 保持精确范围。原有仅含 `tools` 的 Agent 不会自动升级为整组模式。前端旧浏览器记录只有显式保存时才迁移到服务端，已保存配置可在其他客户端恢复。
+
+每个会话在启动时保存实际工具、插件版本与角色范围；续接、恢复、历史工具重试使用该快照。同预设 fork 继承父快照，子 Agent 的工具过滤只能缩小范围。插件或已记住的工具移除、工具归属变化时明确报告不可用，需重新选择，不会静默换成同名工具。
+
+Runtime 的 `/tool-registry` 是官方 `ToolRuntime` 的薄子类，执行、审批、作用域和工具 schema 仍沿用官方实现。组合包暂时禁用官方 `tools` 行并挂载这个提供者，继承该行配置；应用停用后官方提供者恢复。修改原 `tools` 配置后重启 Profile 生效。`/snapshots` 是 Profile 级单例，数据保存在官方 storageDomain 的 `workbench_agent_studio_capabilities` 域；不要在每个 Preset 内重复挂载。
+
+导出文件包含上述 Host 支持行与 Preset 绑定。接收端需要安装同版 Runtime 和实际能力插件。旧的仅含 `tools[]` 的独立预设仍可使用精确范围策略；新插件绑定缺少 Host 支持时会明确拒绝启动。没有历史快照且只能读到 PTC `run_code` 请求的旧会话无法可靠恢复历史工具集合，会提示新建会话。
+
+测试覆盖插件动态增加/移除、来源追踪、跨客户端保存、旧配置兼容、会话恢复、fork/子 Agent 限制、历史手动执行及 Host 卸载。真实预览验证使用本地固定响应适配器，不产生外部模型请求。
 
 ## 1.8.5 样式修复
 

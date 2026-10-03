@@ -1,6 +1,6 @@
 {
   "name": "dsh-workbench-agent-studio-ui",
-  "version": "1.8.5",
+  "version": "1.10.0",
   "description": "Agent Studio Web editor and authenticated API adapter",
   "type": "module",
   "license": "MIT",
@@ -18,12 +18,13 @@
   ],
   "peerDependencies": {
     "@deepseek-ai/dsh": "0.1.7-rc.2",
-    "dsh-workbench-agent-studio-service": "1.8.3"
+    "dsh-workbench-agent-studio-service": "1.10.0"
   },
   "dsh": {
     "client": {
       "platform": "web",
       "inject": [
+        "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-layout",
         "@deepseek-ai/dsh-client-ui-sidebar",

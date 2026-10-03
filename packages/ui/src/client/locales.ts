@@ -1,7 +1,26 @@
+import { pluginCapabilitiesZh, pluginCapabilitiesEn } from './plugin-capabilities.locale.ts'
 /** Agent editor locale owner. */
 export const NS = 'agent-studio'
 /** Simplified Chinese editor copy. */
 export const zh = {
+  ...pluginCapabilitiesZh,
+  pluginFrontendHint:'插件选择方式保存在当前浏览器。运行前请刷新并保存工具范围。',
+  pluginServerHint:'选择随 Agent 保存；整组模式在新任务开始时更新，已开始任务保持原范围。',
+  pluginStorageWarning:'工具配置已保存，浏览器未能保存插件选择方式。重新打开时会恢复为自定义范围。',
+  pluginDirectoryWarning:'暂时无法读取插件安装状态，当前工具目录仍可使用。',
+  pluginOfficialPartial:'官方基础能力 · 部分启用',
+  pluginOfficialMode:'{plugins} 个官方插件',
+  pluginRemove:'移除插件 {name}',
+  pluginSelectionEmpty:'选择插件，为这个 Agent 添加工具能力。',
+  pluginSelectionLoading:'正在读取插件工具…',
+  pluginCapabilitiesLabel:'插件能力',
+  pluginSummaryAll:'全部工具 · 跟随插件更新',
+  pluginSummaryCustom:'自定义 {selected} / {total}',
+  pluginCheckTitle:'当前配置的工具范围',
+  pluginCheckAction:'能力检查',
+  pluginCheckHint:'运行使用已保存的工具配置。修改后请先保存。',
+  pluginCheckTools:'查看工具集合',
+  pluginExternalSummary:'外部工具 · {count} 个',
   startConversation: '用此 Agent 开始对话',
   allowAutoInvocation: '允许总助手自动调用', autoInvocationHint: '开放后，总助手可根据用途选择此 Agent；运行时仍使用其已保存配置。', autoInvocationDescription: '请先填写用途描述，再开放自动调用。',
   connectorTab: '外部工具 · OpenConnector',
@@ -65,6 +84,7 @@ export const zh = {
 export type Key = keyof typeof zh
 /** English editor copy. */
 export const en: Record<Key, string> = {
+  pluginServerHint:'Choices are saved with the Agent. Full plugins refresh when a new task starts; tasks already started keep their tool scope.',
   startConversation: 'Start a conversation with this Agent',
   allowAutoInvocation: 'Allow automatic invocation', autoInvocationHint: 'The coordinator may select this Agent by its purpose. Runs use its saved configuration.', autoInvocationDescription: 'Describe its purpose before allowing automatic invocation.',
   connectorTab: 'External tools · OpenConnector',

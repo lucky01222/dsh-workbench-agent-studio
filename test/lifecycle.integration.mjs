@@ -8,7 +8,7 @@ test('unload drains preparation and newly registered prompt job before closing s
  const gate=deferred(),entered=deferred(),rows=new Map();let closed=false,first=true
  const table={get:id=>rows.get(id),put:async(id,value)=>{if(first){first=false;entered.resolve();await gate.promise}assert.equal(closed,false,'write after close');rows.set(id,value)}}
  const service=new StudioService({llm:{async *stream({signal}){signal.throwIfAborted();yield {type:'text-delta',text:'unexpected'}}}})
- service.domain={table:()=>table,close:async()=>{closed=true}};service.document=()=>({definition});service.selection=d=>d
+ service.domain={table:()=>table,close:async()=>{closed=true}};service.document=()=>({definition});service.selection=d=>d;service.capabilities=async d=>d
  const preparing=service.dispatch('prompt',{id:randomUUID(),instruction:'write',original:'old',definition})
  await entered.promise;const stopping=service.dispose();gate.resolve();const record=await preparing;await stopping
  assert.equal(closed,true);assert.notEqual(rows.get(record.id).status,'running');assert.equal(service.promptJobs.size,0)
