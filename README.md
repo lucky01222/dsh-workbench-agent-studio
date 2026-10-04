@@ -2,13 +2,23 @@
 
 适用于官方 DeepSeek Harness Web **0.1.7-rc.2** 的 Agent 工作室。支持 Agent 配置、多标签草稿、内置预设复制、模型、插件能力与 Skill 选择、提示词编辑、试运行、工具结果编辑及运行历史。
 
+## 1.10.2 资料库合并兼容候选
+
+配合统一资料库 `dsh-workbench-library@0.23.1`，旧知识工具的五个读取工具按真实注册归属校验。旧角色的“全部工具”先固定为保存的范围，已有会话和分支继续受原工具上限约束；历史修订、运行和会话快照保留原样。
+
+工作室提供权限迁移预览、显式应用和撤销。默认保留保存的名单，也可明确选择当前双包的有效范围；预览逐项显示工具增减。新定义采用精确工具选择，未启用的旧选择保留在权限回执中，其他插件选择保持。普通提示词保存不顺带迁移归属。
+
+迁移回执在独立数据域中保存操作身份、版本、权限差异和摘要，不复制提示词。中断后按同一操作身份核对恢复；待完成操作阻止其他保存、删除或新迁移覆盖其恢复点。撤销核对后续权限修改，保留后续提示词等其他编辑。只读、已删除、带自定义组件或冻结运行范围的定义不自动改写。
+
+这是隔离环境验收候选，未切换日常 Profile。软件回退前需先核对配置及当前权限投影；曾在统一插件下运行的新历史快照仍保留其真实 owner，旧软件不能据同名工具猜测归属。
+
 ## 安装
 
 需要 Node.js 24 和官方 Harness 0.1.7-rc.2。先通过下方命令构建安装包，或使用对应版本的完整应用 tgz。指定目标 `DSH_HOME`，停止该 Profile 的 Web 进程后安装：
 
 ```sh
 export DSH_HOME=/absolute/path/to/your-dsh-home
-dsh plugin --profile web add /absolute/path/dsh-workbench-agent-studio-1.10.0.tgz --ignore-scripts --offline
+dsh plugin --profile web add /absolute/path/dsh-workbench-agent-studio-1.10.2.tgz --ignore-scripts --offline
 dsh web --host 127.0.0.1 --port 3184
 ```
 

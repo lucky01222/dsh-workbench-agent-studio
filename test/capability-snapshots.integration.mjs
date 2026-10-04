@@ -12,6 +12,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { createScope, scopeTarget } from '@deepseek-ai/dsh-scope'
 import { CapabilitySnapshots, capabilitySnapshotSpec, restrictCapabilities } from '../packages/runtime/src/snapshots.mjs'
 import * as policy from '../packages/runtime/src/policy.mjs'
+import {LIBRARY_OWNER,LEGACY_KNOWLEDGE_OWNER,LEGACY_LIBRARY_TOOLS,LEGACY_KNOWLEDGE_TOOLS} from '../packages/runtime/src/library-owner-compat.mjs'
 
 const pluginId = '@deepseek-ai/dsh-tool-fs'
 const definition = tools => ({ name: 'Frozen test', description: '', modelSelection: 'explicit', provider: 'test', model: 'test',
@@ -334,4 +335,67 @@ test('new bindings fail Agent creation clearly without support and can load befo
   const key = await h.create('late-host-support')
   assert.equal(resolutions, 1)
   assert.deepEqual((await h.ctx.systemPrompt.assemble({ scope: key, agent: key })).tools.map(tool => tool.name), ['read'])
+})
+
+const libraryRows = () => [...LEGACY_LIBRARY_TOOLS,...LEGACY_KNOWLEDGE_TOOLS].map(name=>({name,pluginId:LIBRARY_OWNER,pluginVersion:'0.23.1'}))
+const legacyLibraryDefinition = () => ({...definition([]),tools:[...LEGACY_LIBRARY_TOOLS.slice(0,7),...LEGACY_KNOWLEDGE_TOOLS],pluginBindings:{
+ [LIBRARY_OWNER]:{enabled:true,mode:'all',tools:[...LEGACY_LIBRARY_TOOLS.slice(0,7)]},
+ [LEGACY_KNOWLEDGE_OWNER]:{enabled:true,mode:'all',tools:[...LEGACY_KNOWLEDGE_TOOLS]},
+}})
+const legacyLibraryFrozen = () => {
+ const definition=legacyLibraryDefinition(),plugins=Object.entries(definition.pluginBindings).map(([id,binding])=>({id,mode:binding.mode,tools:[...binding.tools],version:id===LIBRARY_OWNER?'0.16.10':'0.12.2'}))
+ return {definition,resolution:{version:1,resolvedAt:'2026-10-03T00:00:00.000Z',tools:[...definition.tools],plugins,toolOwners:Object.fromEntries(plugins.flatMap(plugin=>plugin.tools.map(name=>[name,plugin.id])))}}
+}
+
+test('historical dual-package snapshots resume on the unified owner without rewriting or adding tools',async t=>{
+ const h=await setup(t);h.setTools(libraryRows().map(row=>({...row,pluginId:LEGACY_KNOWLEDGE_TOOLS.includes(row.name)?LEGACY_KNOWLEDGE_OWNER:LIBRARY_OWNER,pluginVersion:'0.22.1'})))
+ let service=await h.open();const historical=legacyLibraryFrozen()
+ await service.forAgent(agent('old-library',{agentPreset:'library-role'}),{definition:historical.definition,capabilityResolution:historical.resolution})
+ const before=JSON.stringify(service.get('old-library'));await service.close()
+ h.setTools(libraryRows());service=await h.open()
+ const resumed=await service.forAgent(agent('old-library',{agentPreset:'library-role'}),{definition:legacyLibraryDefinition(),source:'resume'})
+ assert.equal(resumed.resolution.tools.length,12);assert.ok(!resumed.resolution.tools.includes('library_ingest'));assert.equal(resumed.resolution.toolOwners.library_read,LEGACY_KNOWLEDGE_OWNER)
+ assert.equal(JSON.stringify(service.get('old-library')),before)
+ await service.close();service=await h.open();assert.equal(JSON.stringify(service.get('old-library')),before);await service.close()
+})
+
+test('frozen old Knowledge names require the known new owner and version on every resume',async t=>{
+ const h=await setup(t);h.setTools(libraryRows());const service=await h.open(),historical=legacyLibraryFrozen()
+ await service.forAgent(agent('strict-library'),{definition:historical.definition,capabilityResolution:historical.resolution})
+ const before=JSON.stringify(service.get('strict-library'))
+ for(const catalog of [libraryRows().filter(row=>row.name!=='library_read'),libraryRows().map(row=>row.name==='library_read'?{...row,pluginId:'foreign-owner'}:row),libraryRows().map(row=>({...row,pluginVersion:'0.22.1'})),libraryRows().map(row=>({...row,pluginVersion:undefined}))]){
+  h.setTools(catalog);await assert.rejects(service.forAgent(agent('strict-library'),{definition:legacyLibraryDefinition(),source:'resume'}),{code:'CAPABILITY_UNAVAILABLE'});assert.equal(JSON.stringify(service.get('strict-library')),before)
+ }
+ h.setTools(libraryRows())
+ const forged=structuredClone(historical);forged.definition.tools.push('library_ingest');forged.resolution.tools.push('library_ingest');forged.resolution.toolOwners.library_ingest=LEGACY_KNOWLEDGE_OWNER;forged.resolution.plugins.find(p=>p.id===LEGACY_KNOWLEDGE_OWNER).tools.push('library_ingest')
+ await assert.rejects(service.forAgent(agent('forged-library'),{definition:forged.definition,capabilityResolution:forged.resolution}),{code:'CAPABILITY_UNAVAILABLE'});assert.equal(service.get('forged-library'),undefined)
+ await service.close()
+})
+
+test('same-role and different-role library forks preserve the original ceiling across the exact owner compatibility',async t=>{
+ const h=await setup(t);h.setTools(libraryRows());const service=await h.open(),historical=legacyLibraryFrozen()
+ await service.forAgent(agent('library-parent',{agentPreset:'parent-role'}),{definition:historical.definition,capabilityResolution:historical.resolution})
+ const same=await service.forAgent(agent('library-same',{origin:'subagent',isSeeded:true,parentSession:'library-parent',agentPreset:'parent-role'}),{definition:{...legacyLibraryDefinition(),systemPrompt:'new unrelated template'}})
+ assert.equal(same.resolution.tools.length,12);assert.equal(same.definition.systemPrompt,historical.definition.systemPrompt)
+ const reads={...legacyLibraryDefinition(),tools:[...LEGACY_KNOWLEDGE_TOOLS],pluginBindings:{[LEGACY_KNOWLEDGE_OWNER]:{enabled:true,mode:'all',tools:[...LEGACY_KNOWLEDGE_TOOLS]}},systemPrompt:'read-only child role'}
+ const child=await service.forAgent(agent('library-different',{origin:'subagent',isSeeded:true,parentSession:'library-parent',agentPreset:'read-role'}),{definition:reads})
+ assert.deepEqual(child.resolution.tools,[...LEGACY_KNOWLEDGE_TOOLS]);assert.equal(child.definition.systemPrompt,'read-only child role');assert.ok(Object.values(child.resolution.toolOwners).every(owner=>owner===LIBRARY_OWNER))
+ assert.ok(!child.resolution.tools.includes('library_ingest'));await service.close()
+})
+
+test('official child filtering narrows saved old Library and Knowledge names before translating their owner',async t=>{
+ const h=await setup(t);h.setTools(libraryRows().filter(row=>['library_read','library_evidence'].includes(row.name)))
+ const service=await h.open(),child=await service.forAgent(agent('library-filtered',{origin:'subagent'}),{definition:legacyLibraryDefinition()})
+ assert.deepEqual(child.resolution.tools,['library_read','library_evidence']);assert.ok(!child.resolution.tools.includes('library_get'))
+ h.setTools(libraryRows());const resumed=await service.forAgent(agent('library-filtered',{origin:'subagent'}),{definition:legacyLibraryDefinition(),source:'resume'})
+ assert.deepEqual(resumed.resolution.tools,['library_read','library_evidence']);await service.close()
+})
+
+test('new unified all intent narrows conservatively for a content-only child without changing the parent definition',async t=>{
+ const h=await setup(t),all=[...LEGACY_LIBRARY_TOOLS,...LEGACY_KNOWLEDGE_TOOLS],declared={...legacyLibraryDefinition(),tools:all,pluginBindings:{[LIBRARY_OWNER]:{enabled:true,mode:'all',tools:all}}},before=JSON.stringify(declared)
+ h.setTools(libraryRows().filter(row=>['library_get','library_entities'].includes(row.name)));const service=await h.open()
+ const child=await service.forAgent(agent('new-library-filtered',{origin:'subagent'}),{definition:declared})
+ assert.deepEqual(child.resolution.tools,['library_entities','library_get']);assert.equal(child.resolution.plugins[0].mode,'custom');assert.equal(JSON.stringify(declared),before)
+ h.setTools(libraryRows());const fresh=await service.forAgent(agent('new-library-root'),{definition:declared});assert.equal(fresh.resolution.tools.length,15);assert.equal(fresh.resolution.plugins[0].mode,'all')
+ const resumed=await service.forAgent(agent('new-library-filtered',{origin:'subagent'}),{definition:declared,source:'resume'});assert.deepEqual(resumed.resolution.tools,['library_entities','library_get']);await service.close()
 })

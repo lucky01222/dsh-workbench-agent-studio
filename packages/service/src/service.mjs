@@ -13,6 +13,7 @@ import { renderPrompt, renderContextSnapshot } from '@deepseek-ai/dsh-system-pro
 import { executeFinite } from './execution.mjs'
 import { resolveCapabilities, toolsForScope, packageOf } from 'dsh-workbench-agent-studio-runtime/capabilities'
 import providers from './capabilities.json' with { type: 'json' }
+import { LibraryOwnerMigrations, ownerMigrationSpec } from './library-owner-migrations.mjs'
 const spec = defineDomain({ name: 'workbench_agent_studio', version: 1, tables: {
   agents: domainTable(Document), revisions: domainTable(Document), runs: domainTable(Run),
   evaluations: domainTable(Evaluation), receipts: domainTable(Receipt), prompts: domainTable(Prompt),
@@ -34,6 +35,8 @@ export class StudioService {
   constructor(ctx,connector) { this.ctx = ctx; this.connector=connector; this.registered = new Map(); this.live = new Map(); this.pending = new Set(); this.closing = false; this.serial = Promise.resolve(); this.receipts = new Map(); this.manualJobs = new Map(); this.lifetime = new AbortController() }
   async initialize() {
     this.domain = await this.ctx.storageDomain.open(spec)
+    this.ownerMigrationDomain = await this.ctx.storageDomain.open(ownerMigrationSpec)
+    this.ownerMigrations = new LibraryOwnerMigrations(this, this.ownerMigrationDomain)
     this.cwd = join(resolveDshHome(), 'workbench-agent-studio', 'workspace')
     await mkdir(this.cwd, { recursive: true, mode: 0o700 })
     for (const table of ['runs','receipts','prompts']) for (const [id, value] of this.domain.table(table).entries()) {
@@ -166,7 +169,10 @@ export class StudioService {
     if (this.closing) throw error('Studio is stopping', 'UNAVAILABLE')
     if(method.startsWith('connector') && !this.connector) throw error('OpenConnector 接入暂缓', 'UNAVAILABLE')
     switch (method) {
-      case 'bootstrap': return { presets: (await this.ctx.agentPresets.list()).filter(p=>!p.id.startsWith('wb-studio-')), defaultModel:this.ctx.get('agentDefaultModel')?.currentSelection(), cwd: this.cwd, agents: [...this.domain.table('agents').entries()].map(([, value]) => value).filter(d => !d.deleted), capabilityBindings: true, version: '1.10.0', harness: '0.1.7-rc.2' }
+      case 'ownerMigrationPreview': return this.ownerMigrations.preview(args)
+      case 'ownerMigrationApply': return this.ownerMigrations.apply(args)
+      case 'ownerMigrationUndo': return this.ownerMigrations.undo(args)
+      case 'bootstrap': return { presets: (await this.ctx.agentPresets.list()).filter(p=>!p.id.startsWith('wb-studio-')), defaultModel:this.ctx.get('agentDefaultModel')?.currentSelection(), cwd: this.cwd, agents: [...this.domain.table('agents').entries()].map(([, value]) => value).filter(d => !d.deleted), capabilityBindings: true, version: '1.10.1', harness: '0.1.7-rc.2' }
       case 'readPreset': return this.readPreset(z.string().parse(args.id), args.cwd || this.cwd)
       case 'copyPreset': return this.lock(async()=>{const preset=await this.readPreset(args.id,args.cwd||this.cwd), t=now(); const doc=Document.parse({id:randomUUID(),revision:1,createdAt:t,updatedAt:t,definition:{...preset.definition,name:args.name||preset.definition.name+' 副本'},baseYaml:preset.baseYaml,runtime:preset.runtime,sourcePreset:args.id});await this.domain.table('agents').put(doc.id,doc);await this.domain.table('revisions').put(`${doc.id}:1`,doc);await this.register(doc);return doc})
       case 'receipts': return [...this.domain.table('receipts').entries()].map(([,v])=>v).filter(v=>v.runId===args.id)
@@ -186,13 +192,28 @@ export class StudioService {
       })
       case 'save': return this.lock(async () => {
         const doc = this.document(args.id)
+        this.ownerMigrations?.assertNoPending(doc.id)
         if (doc.revision !== args.revision) throw error('Agent 已更新，请重新加载后再保存。', 'REVISION_CONFLICT')
         let definition = Definition.parse(args.definition)
         // Validate and cache the current expansion without persisting a run snapshot.
-        if (definition.pluginBindings !== undefined) definition = (await this.capabilities({ ...doc, definition }, args.cwd ? await this.directory(z.string().parse(args.cwd)) : this.cwd)).definition
+        if (definition.pluginBindings !== undefined) {
+          const submitted = clone(definition.pluginBindings)
+          definition = (await this.capabilities({ ...doc, definition }, args.cwd ? await this.directory(z.string().parse(args.cwd)) : this.cwd)).definition
+          const library = 'dsh-workbench-library', knowledge = 'dsh-library-knowledge'
+          const normalizedLegacy = submitted[knowledge] && !definition.pluginBindings[knowledge]
+            || submitted[library]?.mode === 'all' && definition.pluginBindings[library]?.mode === 'custom'
+          if (normalizedLegacy) {
+            // Ordinary persona edits validate the runtime ceiling, but do not
+            // persist an owner migration without its explicit journal operation.
+            delete definition.pluginBindings[library]; delete definition.pluginBindings[knowledge]
+            if (submitted[library]) definition.pluginBindings[library] = submitted[library]
+            if (submitted[knowledge]) definition.pluginBindings[knowledge] = submitted[knowledge]
+          }
+        }
         if (!this.connector && definition.tools.some(t=>t.startsWith('openconnector/'))) throw error('OpenConnector 接入暂缓', 'UNAVAILABLE')
         const connectorSnapshot = definition.tools.some(t=>t.startsWith('openconnector/')) ? (await this.connector.compose(definition))[0].config : undefined
         const next = Document.parse({ ...doc, capabilityResolution: undefined, revision: doc.revision + 1, definition, connectorSnapshot, updatedAt: now() })
+        if (this.domain.table('revisions').get(doc.id + ':' + next.revision)) throw error('此修订已有待核对的记录，请先完成权限迁移操作。', 'MIGRATION_PENDING')
         await this.domain.table('revisions').put(`${doc.id}:${next.revision}`, next)
         await this.domain.table('agents').put(doc.id, next); await this.register(next); return next
       })
@@ -203,6 +224,7 @@ export class StudioService {
       })
       case 'delete': return this.lock(async () => {
         const doc = this.document(args.id)
+        this.ownerMigrations?.assertNoPending(doc.id)
         if ([...this.live.values()].some(v => v.record.document.id === doc.id && active(v.record))) throw error('请先停止此 Agent 的试运行。')
         await this.domain.table('agents').put(doc.id, { ...doc, deleted: true }); const id = `wb-studio-${doc.id}`; await this.registered.get(id)?.(); this.registered.delete(id); return true
       })
@@ -349,6 +371,6 @@ export class StudioService {
     await Promise.allSettled([...this.live.values()].map(v => v.done).concat([...this.promptJobs?.values() ?? []].map(v => v.done), [...this.receipts.values()].map(v => v.task)))
     await this.serial
     for (const release of this.registered.values()) await release()
-    this.registered.clear(); await this.domain?.close()
+    this.registered.clear(); await this.ownerMigrationDomain?.close(); await this.domain?.close()
   }
 }

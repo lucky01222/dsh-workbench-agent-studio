@@ -1,5 +1,5 @@
 import { Button, IconAgentPresetOutline16, IconCloseOutline16, IconPlusOutline16 } from './primitives.tsx'
-import { chosenPluginTools, officialBundleState, summarizePluginSelection } from './plugin-capabilities.mjs'
+import { chosenPluginTools, officialBundleState, summarizePluginSelection,isLegacyLibraryChoice } from './plugin-capabilities.mjs'
 import type { PluginCapability, PluginSelection } from './plugin-capabilities.types.ts'
 import css from './PluginCapabilitySummary.module.css'
 
@@ -45,7 +45,7 @@ export function PluginCapabilitySummary({ catalog, selection, readOnly, loading,
       )}
       {remaining.map(plugin => renderRow(
         plugin.nameKey ? t(plugin.nameKey) : plugin.name,
-        selection[plugin.id].mode === 'all' && plugin.origin !== 'unassigned' ? t('pluginSummaryAll')
+        plugin.migrationOnly||plugin.unifiedLibrary===true&&isLegacyLibraryChoice(selection[plugin.id])?t('pluginLibrarySavedScope'):selection[plugin.id].mode === 'all' && plugin.origin !== 'unassigned' ? t('pluginSummaryAll')
           : t('pluginSummaryCustom', { selected: chosenPluginTools(plugin, selection).length, total: plugin.tools.length }),
         chosenPluginTools(plugin, selection).length, [plugin.id],
       ))}
