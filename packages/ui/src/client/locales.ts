@@ -3,6 +3,10 @@ import { pluginCapabilitiesZh, pluginCapabilitiesEn } from './plugin-capabilitie
 export const NS = 'agent-studio'
 /** Simplified Chinese editor copy. */
 export const zh = {
+  ownerMigrationReadback:'重新核对迁移记录',ownerMigrationRecoverEdits:'可先核对原操作，未保存的提示词与模型设置会保留；工具选择有修改时会提示冲突。',ownerMigrationApplyChanged:'确认按以上工具差异迁移',ownerMigrationPrepared:'上次操作已准备，请核对并重试原操作以确认结果。',ownerMigrationNeeded:'旧资料库工具绑定待迁移',ownerMigrationFrozen:'当前按已保存的工具范围显示。预览不会修改 Agent，确认后才迁移归属。',ownerMigrationSaveFirst:'请先保存当前修改并停止试运行，再进行迁移。',
+  ownerMigrationPolicy:'迁移范围',ownerMigrationSaved:'仅保留已保存的工具',ownerMigrationCurrent:'按当前可用范围重新预览（可能新增工具）',ownerMigrationWorking:'正在核对…',ownerMigrationPreview:'预览迁移',
+  ownerMigrationCounts:'工具 {before} → {after} 个；新增 {added} 个，移除 {removed} 个。',ownerMigrationDiff:'查看工具归属与范围差异',ownerMigrationOwners:'涉及归属',ownerMigrationBefore:'迁移前',ownerMigrationAfter:'迁移后',ownerMigrationAdded:'新增工具',ownerMigrationRemoved:'移除工具',ownerMigrationDisabled:'停用选择保留在迁移记录中，不作为新权限启用',
+  ownerMigrationNotNeeded:'此配置不需要迁移。',ownerMigrationBlocked:'当前不能安全迁移，请核对上述原因后重新预览。',ownerMigrationApply:'确认迁移，保持工具范围',ownerMigrationApplyAdded:'确认迁移并新增 {count} 个工具',ownerMigrationRetry:'核对并重试原提交',ownerMigrationUndo:'撤销本次迁移',ownerMigrationRetryUndo:'核对并重试原撤销',ownerMigrationApplied:'资料库工具归属已迁移，已保存工具范围。',ownerMigrationUndone:'本次工具归属迁移已撤销。',ownerMigrationError:'工具归属操作尚未完成',
   ...pluginCapabilitiesZh,
   pluginFrontendHint:'插件选择方式保存在当前浏览器。运行前请刷新并保存工具范围。',
   pluginServerHint:'选择随 Agent 保存；整组模式在新任务开始时更新，已开始任务保持原范围。',
@@ -84,6 +88,10 @@ export const zh = {
 export type Key = keyof typeof zh
 /** English editor copy. */
 export const en: Record<Key, string> = {
+  ownerMigrationReadback:'Read current migration record',ownerMigrationRecoverEdits:'You can recover the original operation while keeping unsaved prompt and model edits. Changed tool choices will remain as a conflict.',ownerMigrationApplyChanged:'Confirm the tool changes shown above',ownerMigrationPrepared:'A previous operation was prepared. Check and retry the same operation to confirm its outcome.',ownerMigrationNeeded:'Legacy Library bindings need migration',ownerMigrationFrozen:'The saved tool scope is retained. Preview changes nothing; ownership changes only after confirmation.',ownerMigrationSaveFirst:'Save your edits and stop the current trial before migrating.',
+  ownerMigrationPolicy:'Migration scope',ownerMigrationSaved:'Keep only saved tools',ownerMigrationCurrent:'Preview current availability (may add tools)',ownerMigrationWorking:'Checking…',ownerMigrationPreview:'Preview migration',
+  ownerMigrationCounts:'Tools {before} → {after}; {added} added, {removed} removed.',ownerMigrationDiff:'Inspect ownership and tool differences',ownerMigrationOwners:'Affected owners',ownerMigrationBefore:'Before',ownerMigrationAfter:'After',ownerMigrationAdded:'Added tools',ownerMigrationRemoved:'Removed tools',ownerMigrationDisabled:'Disabled choices stay in the migration record and are not enabled as new permissions',
+  ownerMigrationNotNeeded:'This configuration does not need migration.',ownerMigrationBlocked:'Migration is blocked. Review the reasons above and preview again.',ownerMigrationApply:'Confirm migration, keep scope',ownerMigrationApplyAdded:'Confirm migration and add {count} tools',ownerMigrationRetry:'Check and retry the same request',ownerMigrationUndo:'Undo this migration',ownerMigrationRetryUndo:'Check and retry the same undo',ownerMigrationApplied:'Library ownership migrated with the recorded tool scope.',ownerMigrationUndone:'This ownership migration was undone.',ownerMigrationError:'Ownership operation did not complete',
   pluginServerHint:'Choices are saved with the Agent. Full plugins refresh when a new task starts; tasks already started keep their tool scope.',
   startConversation: 'Start a conversation with this Agent',
   allowAutoInvocation: 'Allow automatic invocation', autoInvocationHint: 'The coordinator may select this Agent by its purpose. Runs use its saved configuration.', autoInvocationDescription: 'Describe its purpose before allowing automatic invocation.',

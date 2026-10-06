@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { Button, Input, Modal, IconCloseOutline16, IconSearchOutline16, IconCordisPluginOutline14, IconChevronDownOutline14, IconChevronUpOutline14, IconChevronLeftOutline14, IconChevronRightOutline14, IconCheckOutline16, IconWarningOutline16, IconLoadingOutline16 } from './primitives.tsx'
-import { clonePluginSelection, chosenPluginTools, pluginSelectionSummary, setPluginEnabled, setPluginMode, togglePluginTool, officialBundleState, setOfficialBundle, proposePluginMode, proposeOfficialBundle } from './plugin-capabilities.mjs'
+import { clonePluginSelection, chosenPluginTools, pluginSelectionSummary, setPluginEnabled, setPluginMode, togglePluginTool, officialBundleState, setOfficialBundle, proposePluginMode, proposeOfficialBundle,isLegacyLibraryChoice } from './plugin-capabilities.mjs'
 import type { PendingPluginBroadening, PluginCapability, PluginMode, PluginSelection, PluginTool } from './plugin-capabilities.types.ts'
 import { pluginCapabilitiesZh } from './plugin-capabilities.locale.ts'
 import css from './PluginPicker.module.css'
@@ -143,7 +143,7 @@ export function PluginPicker({ open, catalog, selection, readOnly = false, loadi
     const choice = draft[plugin.id], tools = chosenPluginTools(plugin, draft), hits = matchedTools(plugin)
     const reason = reasonOf(plugin)
     return <div key={plugin.id} className={clsx(css.pluginRow, active?.id === plugin.id && css.activeRow)}>
-      {plugin.origin !== 'unassigned' && <input type="checkbox" className={css.checkbox} aria-label={t('pluginPickerEnable', { name: nameOf(plugin) })} checked={choice?.enabled ?? false} disabled={readOnly || !plugin.available && !choice?.tools.length} title={!plugin.available ? reason || t('pluginCapabilityNotInCatalog') : undefined} onChange={event => { changeEnabled(plugin, event.currentTarget.checked) }} />}
+      {plugin.origin !== 'unassigned' && <input type="checkbox" className={css.checkbox} aria-label={t('pluginPickerEnable', { name: nameOf(plugin) })} checked={choice?.enabled ?? false} disabled={readOnly || plugin.migrationOnly || !plugin.available && !choice?.tools.length} title={!plugin.available ? reason || t('pluginCapabilityNotInCatalog') : undefined} onChange={event => { changeEnabled(plugin, event.currentTarget.checked) }} />}
       <button type="button" ref={element => { if (element) rowRefs.current.set(plugin.id, element); else rowRefs.current.delete(plugin.id) }} className={css.pluginOpen} aria-current={active?.id === plugin.id ? 'true' : undefined} onClick={() => { selectPlugin(plugin) }}>
         <IconCordisPluginOutline14 size={16} />
         <span className={css.pluginText}><strong>{nameOf(plugin)}</strong><small>{descriptionOf(plugin)}</small>
@@ -191,9 +191,9 @@ export function PluginPicker({ open, catalog, selection, readOnly = false, loadi
               <div>{active.origin !== 'unassigned' && <strong>{t('pluginPickerUnavailableHint')}</strong>}{reasonOf(active) && <p>{reasonOf(active)}</p>}{active.requiresContext && <p>{t('pluginPickerContext', { context: active.requiresContext })}</p>}</div>
             </div>}
             {active.origin !== 'unassigned' ? <>
-              <label className={css.enable}><input type="checkbox" className={css.checkbox} checked={currentChoice?.enabled ?? false} disabled={readOnly || !active.available && !currentChoice?.tools.length} title={!active.available ? reasonOf(active) || t('pluginCapabilityNotInCatalog') : undefined} onChange={event => { changeEnabled(active, event.currentTarget.checked) }} /><span>{t('pluginPickerEnableDetail')}</span></label>
-              <div className={css.modes} role="group" aria-label={t('pluginPickerScope')}>{(['all', 'custom'] as const).map(mode => <Button key={mode} size="sm" shape="rounded" aria-pressed={(currentChoice?.mode ?? 'all') === mode} disabled={readOnly || !currentChoice?.enabled} onClick={() => { changeMode(active, mode) }}>{t(mode === 'all' ? 'pluginPickerAllTools' : 'pluginPickerCustomTools')}</Button>)}</div>
-              <p className={css.scopeHint}>{t((currentChoice?.mode ?? 'all') === 'all' ? 'pluginPickerAllHint' : 'pluginPickerCustomHint')}</p>
+              <label className={css.enable}><input type="checkbox" className={css.checkbox} checked={currentChoice?.enabled ?? false} disabled={readOnly || active.migrationOnly || !active.available && !currentChoice?.tools.length} title={!active.available ? reasonOf(active) || t('pluginCapabilityNotInCatalog') : undefined} onChange={event => { changeEnabled(active, event.currentTarget.checked) }} /><span>{t('pluginPickerEnableDetail')}</span></label>
+              <div className={css.modes} role="group" aria-label={t('pluginPickerScope')}>{(['all', 'custom'] as const).map(mode => <Button key={mode} size="sm" shape="rounded" aria-pressed={(currentChoice?.mode ?? 'all') === mode} disabled={readOnly || active.migrationOnly || !currentChoice?.enabled} onClick={() => { changeMode(active, mode) }}>{t(mode === 'all' ? 'pluginPickerAllTools' : 'pluginPickerCustomTools')}</Button>)}</div>
+              <p className={css.scopeHint}>{t(active.migrationOnly||active.unifiedLibrary&&isLegacyLibraryChoice(currentChoice)?'pluginLibrarySavedScope':(currentChoice?.mode ?? 'all') === 'all' ? 'pluginPickerAllHint' : 'pluginPickerCustomHint')}</p>
               {pending?.pluginId === active.id && confirmation('plugin')}
             </> : <p className={css.scopeHint}>{t('pluginPickerUnassignedHint')}</p>}
             {!!active.requiredPlugins?.length && <p className={css.related}>{t('pluginPickerDependencies', { plugins: active.requiredPlugins.map(id => { const plugin = catalog.find(item => item.id === id); return plugin ? nameOf(plugin) : id }).join('、') })}</p>}
@@ -204,7 +204,7 @@ export function PluginPicker({ open, catalog, selection, readOnly = false, loadi
               const editable = currentChoice?.mode === 'custom' || active.origin === 'unassigned'
               const condition = reasonOf(tool)
               return <div className={css.toolRow} key={tool.id}>
-                {editable ? <input type="checkbox" className={css.checkbox} aria-label={t('pluginPickerChooseTool', { name: tool.name })} checked={chosenIds.has(tool.id)} disabled={readOnly || active.origin !== 'unassigned' && !currentChoice?.enabled || !tool.available && !chosenIds.has(tool.id)} title={!tool.available ? condition || t('pluginPickerNotInCatalog') : undefined} onChange={event => { const checked = event.currentTarget.checked; setPending(null); setDraft(value => togglePluginTool(value, active, tool.id, checked)) }} /> : <span className={clsx(css.toolMark, !chosenIds.has(tool.id) && css.disabledMark)} aria-hidden="true">{chosenIds.has(tool.id) && <IconCheckOutline16 size={14} />}</span>}
+                {editable ? <input type="checkbox" className={css.checkbox} aria-label={t('pluginPickerChooseTool', { name: tool.name })} checked={chosenIds.has(tool.id)} disabled={readOnly || active.migrationOnly || active.origin !== 'unassigned' && !currentChoice?.enabled || !tool.available && !chosenIds.has(tool.id)} title={!tool.available ? condition || t('pluginPickerNotInCatalog') : undefined} onChange={event => { const checked = event.currentTarget.checked; setPending(null); setDraft(value => togglePluginTool(value, active, tool.id, checked)) }} /> : <span className={clsx(css.toolMark, !chosenIds.has(tool.id) && css.disabledMark)} aria-hidden="true">{chosenIds.has(tool.id) && <IconCheckOutline16 size={14} />}</span>}
                 <div className={css.toolText}><strong>{labelOf(tool) !== tool.name ? <>{labelOf(tool)}<code>{tool.name}</code></> : <code>{tool.name}</code>}</strong><small>{tool.description}</small>{condition && <small className={css.conditionText}>{condition}</small>}{tool.requiresContext && <small>{t('pluginPickerContext', { context: tool.requiresContext })}</small>}</div>
               </div>
             })}</div>

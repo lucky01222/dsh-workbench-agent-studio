@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { Definition, CapabilityResolution } from './schema.mjs'
 import { resolveCapabilities, toolsForScope } from './capabilities.mjs'
+import { normalizeLibraryOwnerBindings, isCompatibleLibraryToolOwner, isLegacyLibraryBinding } from './library-owner-compat.mjs'
 
 const FrozenCapabilities = z.object({ definition: Definition, resolution: CapabilityResolution }).strict()
 const Snapshot = FrozenCapabilities.extend({ sessionId: z.string().min(1), presetId: z.string().optional() }).strict()
@@ -31,7 +32,7 @@ function validateAvailable(snapshot, rows) {
     if (!row || row.unavailable) throw unavailable(`工具不可用：${name}`)
     const owner = snapshot.resolution.toolOwners?.[name]
       || snapshot.resolution.plugins.find(plugin => plugin.id !== 'unassigned' && plugin.tools.includes(name))?.id
-    if (owner && row.pluginId !== owner) throw unavailable(`工具归属已变化：${name}`)
+    if (owner && row.pluginId !== owner && !isCompatibleLibraryToolOwner(name, owner, row)) throw unavailable(`工具归属已变化：${name}`)
   }
 }
 
@@ -141,15 +142,19 @@ export class CapabilitySnapshots {
   resolveChild(definition, rows) {
     const effective = rows.filter(row => !row.unavailable)
     const visible = new Set(effective.map(row => toolName(row.id || row.name)))
-    const input = clone(definition)
+    let input = clone(definition)
     input.tools = input.tools.filter(name => visible.has(toolName(name)))
     if (!visible.has('skill')) input.skills = []
     if (input.pluginBindings) input.pluginBindings = Object.fromEntries(Object.entries(input.pluginBindings).map(([id, binding]) => {
       const tools = binding.tools.filter(name => visible.has(toolName(name)))
-      const enabled = binding.enabled && (binding.mode === 'all' && id !== 'unassigned'
+      const enabled = binding.enabled && (isLegacyLibraryBinding(id, binding) ? tools.length > 0 : binding.mode === 'all' && id !== 'unassigned'
         ? effective.some(row => row.pluginId === id) : tools.length > 0)
       return [id, { ...binding, tools, enabled }]
     }))
+    // The official child filter may hide saved names. Narrow those names first,
+    // then translate owners before resolution; never fabricate missing rows or
+    // disable a visible old Knowledge tool solely because its owner was renamed.
+    input = normalizeLibraryOwnerBindings(input, effective)
     const snapshot = this.resolveDefinition(input, effective)
     if (definition.pluginBindings) snapshot.definition.pluginBindings = clone(definition.pluginBindings)
     return snapshot

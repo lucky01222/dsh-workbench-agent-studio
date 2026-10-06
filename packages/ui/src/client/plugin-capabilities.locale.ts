@@ -1,5 +1,8 @@
 /** Localized copy for the transactional plugin capability picker. */
 export const pluginCapabilitiesZh = {
+  pluginCapabilityUnifiedLibraryDescription:'保存与整理原始资料，检索知识并核对出处，管理知识纠正与撤销。',
+  pluginLibraryOwnerMoved:'原知识工具已并入资料库；保留旧选择，请在配置中预览归属迁移。',
+  pluginLibrarySavedScope:'旧绑定 · 暂按已保存范围',
   pluginPickerTitle: '选择插件',
   pluginPickerHint: '整组启用后，自动纳入插件新增的工具。',
   pluginPickerClose: '关闭插件选择',
@@ -117,6 +120,9 @@ export const pluginCapabilitiesZh = {
 
 /** English uses the same keys, including real registered tool labels. */
 export const pluginCapabilitiesEn: Record<keyof typeof pluginCapabilitiesZh, string> = {
+  pluginCapabilityUnifiedLibraryDescription:'Save and organize materials, search knowledge, verify sources, and manage corrections and undo.',
+  pluginLibraryOwnerMoved:'The knowledge tools moved into Library. Existing choices are retained; preview the ownership migration in configuration.',
+  pluginLibrarySavedScope:'Legacy binding · Saved scope retained',
   pluginPickerTitle: 'Choose plugins', pluginPickerHint: 'Enabling the full plugin automatically includes tools added in future updates.',
   pluginPickerClose: 'Close plugin selection', pluginPickerCancel: 'Cancel', pluginPickerComplete: 'Done', pluginPickerRefresh: 'Refresh catalog',
   pluginPickerFilterLabel: 'Plugin source', pluginPickerAll: 'All', pluginPickerCustom: 'Custom', pluginPickerOfficial: 'Official', pluginPickerSelected: 'Selected',

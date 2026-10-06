@@ -39,6 +39,14 @@ export const KNOWN_PLUGIN_CONTRACTS = Object.freeze([
 ])
 
 const nameOwner = new Map(KNOWN_PLUGIN_CONTRACTS.flatMap(plugin => plugin.names.map(name => [name, plugin.id])))
+export const LIBRARY_OWNER='dsh-workbench-library'
+export const LEGACY_KNOWLEDGE_OWNER='dsh-library-knowledge'
+const retrievalNames=new Set(['library_list','library_search','library_read','library_evidence','library_graph'])
+export const UNIFIED_LIBRARY_TOOLS=Object.freeze(['library_locate','library_entities','library_relations','library_get','library_correct','library_operation','library_undo','library_sources','library_ingest','library_ingest_operation',...retrievalNames])
+/** Presentation guard only; the Host's migration preview remains authoritative. */
+export function isUnifiedLibraryCatalog(rows=[]){return rows.some(row=>{const v=/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\+[0-9A-Za-z.-]+)?$/.exec(row?.pluginVersion||''),stable=!!v&&v.slice(1).map(Number).every(Number.isSafeInteger)&&(Number(v[1])>0||Number(v[2])>23||Number(v[2])===23&&Number(v[3])>=1);return row?.pluginId===LIBRARY_OWNER&&(retrievalNames.has(row.name)||UNIFIED_LIBRARY_TOOLS.includes(row.name)&&stable)})}
+export function isLegacyLibraryChoice(choice){return choice?.mode==='all'&&!choice.tools?.some(name=>retrievalNames.has(name))}
+export function hasLegacyLibraryBindings(selection={}){return Object.hasOwn(selection,LEGACY_KNOWLEDGE_OWNER)||isLegacyLibraryChoice(selection[LIBRARY_OWNER])}
 const UNASSIGNED = 'unassigned'
 const connector = row => row.source === 'openconnector' || row.name?.startsWith('openconnector/') || row.id?.startsWith('openconnector/')
 const unique = values => [...new Set(values.filter(value => typeof value === 'string' && value.length > 0))]
@@ -73,6 +81,7 @@ function missingTool(id, requiresContext) {
 
 /** Build a presentation catalog from actual Host tool rows; never synthesize availability. */
 export function buildPluginCatalog(toolRows = [], options = {}) {
+  const unified=isUnifiedLibraryCatalog(toolRows)
   const authoritative = options.capabilityBindings === true || toolRows.some(row => row && Object.hasOwn(row, 'pluginId'))
   const metadata = new Map(KNOWN_PLUGIN_CONTRACTS.map(plugin => [plugin.id, plugin]))
   const groups = new Map(authoritative ? [] : KNOWN_PLUGIN_CONTRACTS.map(plugin => [plugin.id, []]))
@@ -92,13 +101,15 @@ export function buildPluginCatalog(toolRows = [], options = {}) {
   const installed = new Map((options.installedBundles || []).map(bundle => typeof bundle === 'string'
     ? [bundle, { installed: true }] : [bundle.packageName || bundle.name, bundle]))
   if (authoritative) {
-    for (const id of installed.keys()) if (metadata.has(id) && !groups.has(id)) groups.set(id, [])
+    for (const id of installed.keys()) if (metadata.has(id) && !groups.has(id)&&!(unified&&id===LEGACY_KNOWLEDGE_OWNER&&!options.selection?.[id])) groups.set(id, [])
     for (const id of Object.keys(options.selection || {})) if (id !== UNASSIGNED && !groups.has(id)) groups.set(id, [])
   }
   const failures = new Map((options.unavailable || []).map(failure => [failure.provider, failure.reason]))
   const plugins = [...groups].map(([id, actual]) => {
-    const contract = metadata.get(id) || { id, packageName: id, name: id, nameKey: '', description: '', descriptionKey: '',
+    let contract = metadata.get(id) || { id, packageName: id, name: id, nameKey: '', description: '', descriptionKey: '',
       origin: id.startsWith('@deepseek-ai/') ? 'official' : 'custom', names: [], discovery: 'host-registry' }
+    if(unified&&id===LIBRARY_OWNER)contract={...contract,names:UNIFIED_LIBRARY_TOOLS,descriptionKey:'pluginCapabilityUnifiedLibraryDescription'}
+    const migrationOnly=unified&&id===LEGACY_KNOWLEDGE_OWNER
     const actualNames = new Set(actual.map(tool => tool.name))
     const bundle = installed.get(contract.packageName)
     const disabled = bundle?.enabled === false
@@ -106,16 +117,17 @@ export function buildPluginCatalog(toolRows = [], options = {}) {
     const missing = authoritative ? options.selection?.[id]?.tools || [] : contract.names
     const actualIds = new Set(actual.map(tool => tool.id))
     const tools = [...actual, ...unique(missing).filter(name => authoritative ? !actualIds.has(name) : !actualNames.has(name)).map(name => missingTool(name, contract.requiresContext))]
-    const activeTools = disabled || absent ? tools.map(tool => ({ ...tool, available: false,
-      reasonKey: absent ? 'pluginPickerPluginNotInstalled' : 'pluginPickerPluginDisabled' })) : tools
+    const activeTools = disabled || absent || migrationOnly ? tools.map(tool => ({ ...tool, available: false,
+      reasonKey: migrationOnly?'pluginLibraryOwnerMoved':absent ? 'pluginPickerPluginNotInstalled' : 'pluginPickerPluginDisabled' })) : tools
     const available = activeTools.some(tool => tool.available)
     const failure = failures.get(contract.provider) || failures.get(contract.id) || failures.get(contract.packageName)
     const reason = reasonText(bundle?.reason || bundle?.error || failure)
-    const reasonKey = absent ? 'pluginPickerPluginNotInstalled' : disabled ? 'pluginPickerPluginDisabled'
+    const reasonKey = migrationOnly?'pluginLibraryOwnerMoved':absent ? 'pluginPickerPluginNotInstalled' : disabled ? 'pluginPickerPluginDisabled'
       : !available ? contract.requiresContext ? 'pluginPickerContextRequired' : 'pluginPickerNotInCatalog'
       : activeTools.some(tool => !tool.available) ? 'pluginPickerPartiallyAvailable' : undefined
     const { names, provider, ...labels } = contract
     return { ...labels, discovery: authoritative ? 'host-registry' : labels.discovery, tools: activeTools, available,
+      ...(unified&&id===LIBRARY_OWNER?{unifiedLibrary:true}:{}),...(migrationOnly?{migrationOnly:true}:{}),
       ...(reason ? { reason, unavailable: !available ? reason : undefined } : {}),
       ...(reasonKey ? { reasonKey } : {}),
       ...(versions.has(id) || bundle?.version ? { version: versions.get(id) || bundle.version } : {}),
@@ -140,8 +152,11 @@ export function selectionFromTools(tools = [], catalog = [], persisted) {
   const selection = persisted ? clonePluginSelection(persisted) : {}
   const owned = new Map(catalog.flatMap(plugin => plugin.tools.map(tool => [tool.id, plugin.id])))
   const assigned = new Set(Object.values(selection).filter(choice => choice.enabled).flatMap(choice => choice.tools))
+  const disabled = new Set(Object.values(selection).filter(choice => !choice.enabled).flatMap(choice => choice.tools))
   for (const key of unique(tools).filter(key => !key.startsWith('openconnector/'))) {
     if (assigned.has(key)) continue
+    // A stale flat preview must not resurrect an explicitly disabled binding.
+    if(persisted&&disabled.has(key))continue
     let id = owned.get(key) || UNASSIGNED
     const owner = catalog.find(plugin => plugin.id === id)
     // A legacy name is not evidence that its historical provider changed. Keep
@@ -157,6 +172,7 @@ export function selectionFromTools(tools = [], catalog = [], persisted) {
 
 function chosenIds(plugin, choice) {
   if (!choice?.enabled) return []
+  if(plugin.migrationOnly||plugin.unifiedLibrary===true&&isLegacyLibraryChoice(choice))return unique(choice.tools)
   if (choice.mode !== 'all' || plugin.origin === 'unassigned') return unique(choice.tools)
   // A lost tool remains selected, so catalog refresh cannot silently erase a
   // capability from an existing Agent. The UI can explain or remove it.
@@ -179,6 +195,7 @@ export function flattenPluginSelection(selection = {}, catalog = []) {
 
 export function setPluginEnabled(selection, plugin, enabled) {
   const current = selection[plugin.id]
+  if(enabled&&plugin.migrationOnly)return selection
   if (current?.enabled === enabled) return selection
   if (enabled && !plugin.available && !current?.tools.length) return selection
   const choice = current ? normalizeChoice(current) : { enabled: false, mode: plugin.origin === 'unassigned' ? 'custom' : 'all', tools: availableIds(plugin) }
@@ -193,6 +210,7 @@ export function pluginBroadeningCount(plugin, selection) {
 
 export function proposePluginMode(selection, plugin, mode) {
   const current = selection[plugin.id] || emptyChoice()
+  if(plugin.migrationOnly)return {selection,pending:null}
   if (mode === current.mode || plugin.origin === 'unassigned') return { selection, pending: null }
   if (mode === 'all') {
     const selected = new Set(current.tools)
@@ -204,7 +222,7 @@ export function proposePluginMode(selection, plugin, mode) {
 
 export function setPluginMode(selection, plugin, mode, options = {}) {
   const current = selection[plugin.id] || emptyChoice()
-  if (mode === current.mode || plugin.origin === 'unassigned' || !['all', 'custom'].includes(mode)) return selection
+  if (plugin.migrationOnly || mode === current.mode || plugin.origin === 'unassigned' || !['all', 'custom'].includes(mode)) return selection
   if (mode === 'all' && !options.confirmed && pluginBroadeningCount(plugin, selection)) return selection
   const tools = mode === 'all' ? unique([...availableIds(plugin), ...current.tools])
     : current.enabled ? chosenIds(plugin, current) : unique(current.tools)
@@ -212,6 +230,7 @@ export function setPluginMode(selection, plugin, mode, options = {}) {
 }
 
 export function togglePluginTool(selection, plugin, toolId, checked) {
+  if(plugin.migrationOnly)return selection
   const current = selection[plugin.id] || emptyChoice()
   const chosen = chosenIds(plugin, current)
   if (chosen.includes(toolId) === checked) return selection

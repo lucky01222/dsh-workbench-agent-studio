@@ -5,11 +5,39 @@ import {
   setPluginMode, proposePluginMode, togglePluginTool, setOfficialBundle,
   proposeOfficialBundle, officialBundleState, summarizePluginSelection,
   chosenPluginTools, clonePluginSelection, KNOWN_PLUGIN_CONTRACTS,
+  LIBRARY_OWNER,LEGACY_KNOWLEDGE_OWNER,UNIFIED_LIBRARY_TOOLS,isUnifiedLibraryCatalog,
 } from '../packages/ui/src/client/plugin-capabilities.mjs'
 
 const rows = (...names) => names.map(name => ({ name, description: `Host description: ${name}` }))
 const plugin = (catalog, suffix) => catalog.find(item => item.id.endsWith(suffix))
 const frozen = value => { for (const child of Object.values(value)) if (child && typeof child === 'object') frozen(child); return Object.freeze(value) }
+
+const unifiedRows=()=>UNIFIED_LIBRARY_TOOLS.map(name=>({name,description:name,pluginId:LIBRARY_OWNER,pluginVersion:'0.23.1'}))
+test('unified ownership candidates use known tool identities and the stable contract version',()=>{
+ assert.equal(isUnifiedLibraryCatalog([{name:'library_delete',pluginId:LIBRARY_OWNER,pluginVersion:'0.23.1'}]),false)
+ for(const version of ['0.23.0','0.23.1-beta','unknown'])assert.equal(isUnifiedLibraryCatalog([{name:'library_get',pluginId:LIBRARY_OWNER,pluginVersion:version}]),false)
+ assert.equal(isUnifiedLibraryCatalog([{name:'library_get',pluginId:LIBRARY_OWNER,pluginVersion:'0.23.1'}]),true)
+ assert.equal(isUnifiedLibraryCatalog([{name:'library_search',pluginId:LIBRARY_OWNER}]),true,'changed ownership without a version is only a conservative candidate; the Host must still verify migration')
+})
+test('unified Library catalog has one live group and old Knowledge remains only a non-activatable migration placeholder',()=>{
+ const catalog=buildPluginCatalog(unifiedRows(),{capabilityBindings:true,installedBundles:[LIBRARY_OWNER,LEGACY_KNOWLEDGE_OWNER]})
+ assert.equal(catalog.find(p=>p.id===LIBRARY_OWNER).tools.length,15);assert.equal(catalog.some(p=>p.id===LEGACY_KNOWLEDGE_OWNER),false)
+ const selection={[LEGACY_KNOWLEDGE_OWNER]:{enabled:false,mode:'custom',tools:['library_search']}},withOld=buildPluginCatalog(unifiedRows(),{capabilityBindings:true,selection}),old=withOld.find(p=>p.id===LEGACY_KNOWLEDGE_OWNER)
+ assert.equal(old.migrationOnly,true);assert.equal(old.available,false);assert.deepEqual(setPluginEnabled(selection,old,true),selection);assert.deepEqual(togglePluginTool(selection,old,'library_search',true),selection)
+})
+test('legacy Library all is frozen at saved scope while newly confirmed unified all uses the unchanged binding schema and follows new tools',()=>{
+ const catalog=buildPluginCatalog(unifiedRows(),{capabilityBindings:true}),lib=catalog.find(p=>p.id===LIBRARY_OWNER),old=frozen({[LIBRARY_OWNER]:{enabled:true,mode:'all',tools:['library_get','library_correct']}})
+ assert.deepEqual(flattenPluginSelection(old,catalog),['library_get','library_correct']);assert.equal(old[LIBRARY_OWNER].mode,'all');assert.equal(Object.hasOwn(old[LIBRARY_OWNER],'contract'),false)
+ const custom=setPluginMode(old,lib,'custom'),proposal=proposePluginMode(custom,lib,'all');assert.equal(proposal.pending.count,13)
+ const chosen=setPluginMode(custom,lib,'all',{confirmed:true});assert.equal(Object.hasOwn(chosen[LIBRARY_OWNER],'contract'),false);assert.deepEqual(clonePluginSelection(chosen),chosen)
+ const refreshed=buildPluginCatalog([...unifiedRows(),{name:'future_library_tool',pluginId:LIBRARY_OWNER,pluginVersion:'0.24.0'}],{capabilityBindings:true})
+ assert.equal(flattenPluginSelection(chosen,refreshed).length,16)
+})
+test('a stale flat tool preview cannot re-enable explicit disabled bindings while ownership migration is pending',()=>{
+ const selection=frozen({[LIBRARY_OWNER]:{enabled:false,mode:'all',tools:['library_correct']},[LEGACY_KNOWLEDGE_OWNER]:{enabled:true,mode:'custom',tools:['library_search']},other:{enabled:false,mode:'custom',tools:['other_tool']}})
+ const catalog=buildPluginCatalog(unifiedRows(),{capabilityBindings:true,selection}),restored=selectionFromTools(['library_correct','library_search','other_tool'],catalog,selection)
+ assert.deepEqual(restored,selection);assert.deepEqual(flattenPluginSelection(restored,catalog),['library_search'])
+})
 
 test('verified contracts retain 16 official owners / 29 tools and 4 custom owners / 28 tools', () => {
   const official = KNOWN_PLUGIN_CONTRACTS.filter(item => item.origin === 'official')

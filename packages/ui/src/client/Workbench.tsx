@@ -16,6 +16,7 @@ import { RecordsPane } from './RecordsPane.tsx'
 import css from './Workbench.module.css'
 import { PluginPicker } from './PluginPicker.tsx'
 import { PluginCapabilitySummary } from './PluginCapabilitySummary.tsx'
+import {OwnerMigrationNotice} from './OwnerMigrationNotice.tsx'
 import { buildPluginCatalog, clonePluginSelection, selectionFromTools, chosenPluginTools, summarizePluginSelection } from './plugin-capabilities.mjs'
 import type { PluginCapability, PluginSelection } from './plugin-capabilities.types.ts'
 import type { Key } from './locales.ts'
@@ -28,7 +29,7 @@ function OperationError({ error, t }: { error: string | null; t: WorkbenchProps[
   </div> : null
 }
 /** Render the managed Agent editor with framework-derived state and actions. */
-export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly PluginCapability[]; changePluginSelection?: (selection: PluginSelection) => void }) {
+export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly PluginCapability[]; changePluginSelection?: (selection: PluginSelection) => void;ownerMigrationNeeded?:boolean;previewOwnerMigration?:(policy:'saved'|'current')=>Promise<unknown>;applyOwnerMigration?:()=>Promise<unknown>;undoOwnerMigration?:()=>Promise<unknown> }) {
   const state = props.useEditor(s => s), view = props.useStore(s => s), records = props.useRecords(s => s), { t } = props
   const [pluginDetailId, setPluginDetailId] = useState<string | undefined>();
   const [dialog, setDialog] = useState<Dialog>(null), [search, setSearch] = useState(''), [newName, setNewName] = useState('')
@@ -201,6 +202,7 @@ export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly Plu
                   {!readOnly && <p className={css.hint}>{t(state.capabilityBindings ? 'pluginServerHint' : 'pluginFrontendHint')}</p>}
                   {state.pluginStorageWarning && <p className={css.hint} role="status">{t('pluginStorageWarning')}</p>}
                   {state.pluginDirectoryError && <details className={css.pluginWarning}><summary>{t('pluginDirectoryWarning')}</summary><p>{state.pluginDirectoryError}</p></details>}
+                  {!readOnly&&props.previewOwnerMigration&&props.applyOwnerMigration&&props.undoOwnerMigration&&<OwnerMigrationNotice needed={props.ownerMigrationNeeded===true} state={state.ownerMigration} recoveryDisabled={state.busy||state.executingToolIds.length>0||['running','preparing'].includes(state.runState?.run?.status||'')} disabled={state.busy||state.status!=='saved'||state.executingToolIds.length>0||['running','preparing'].includes(state.runState?.run?.status||'')} t={pluginT} onPreview={policy=>invoke(props.previewOwnerMigration!(policy))} onApply={()=>invoke(props.applyOwnerMigration!())} onUndo={()=>invoke(props.undoOwnerMigration!())}/>}
                 </div></div>
                 <div className={css.capability}><label>{t('skills')}</label><div className={css.chips}>
                   {draft.skills.length ? draft.skills.map(name => <Pill appearance="tag" key={name} title={name} onClick={() => { openDialog('skills') }}

@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
 import { Definition, CapabilityResolution } from './schema.mjs'
+import { normalizeLibraryOwnerBindings } from './library-owner-compat.mjs'
 
 const require = createRequire(import.meta.url)
 const unique = values => [...new Set(values)]
@@ -50,7 +51,7 @@ export async function toolsForScope(ctx, scope) {
 
 /** Resolve intent once. Old flat definitions remain exact; bindings never grant unknown tools. */
 export function resolveCapabilities(input, toolRows) {
-  const definition = Definition.parse(input)
+  const definition = normalizeLibraryOwnerBindings(Definition.parse(input), toolRows)
   const index = new Map(toolRows.map(row => [row.id || row.name, row]))
   const plugins = [], selected = []
   if (definition.pluginBindings === undefined) selected.push(...definition.tools)

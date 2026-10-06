@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { StudioController } from '../packages/ui/src/client/controller.mjs'
 import { PluginChoiceStore } from '../packages/ui/src/client/plugin-choice-store.mjs'
 import { setPluginMode, setPluginEnabled } from '../packages/ui/src/client/plugin-capabilities.mjs'
+import {LIBRARY_OWNER,LEGACY_KNOWLEDGE_OWNER,UNIFIED_LIBRARY_TOOLS} from '../packages/ui/src/client/plugin-capabilities.mjs'
 import { Definition } from 'dsh-workbench-agent-studio-runtime/schema'
 import './client-styles.integration.mjs'
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject}}
@@ -10,6 +11,114 @@ const definition={name:'A',description:'',provider:'test',model:'test',modelSele
 const doc=id=>({id,agentPreset:id,revision:1,definition:{...definition,name:id},readOnly:false})
 function setup(custom={}){const docs=[doc('a'),doc('b')];const api=async(method,args)=>{if(custom[method])return custom[method](args);if(method==='bootstrap')return {agents:docs,presets:[],cwd:'/tmp'};if(method==='models')return [];if(method==='catalog')return {tools:[],skills:[]};if(method==='history')return {runs:[],evaluations:[]};throw Error(method)};const c=new StudioController(api);c.documents=docs;c.publish({document:docs[0],draft:docs[0].definition,cwd:'/tmp',openIds:['a'],messages:[{id:'m',role:'user',text:'hello'}]});return c}
 const run=id=>({id,sessionId:id,status:'succeeded',document:doc('a'),input:[],output:[{id:'out',role:'assistant',text:id}],mode:'model-only'})
+
+function migrationSetup(){
+ const oldLibrary=UNIFIED_LIBRARY_TOOLS.slice(0,7),oldKnowledge=UNIFIED_LIBRARY_TOOLS.slice(10),tools=[...oldLibrary,...oldKnowledge],bindings={[LIBRARY_OWNER]:{enabled:true,mode:'all',tools:oldLibrary},[LEGACY_KNOWLEDGE_OWNER]:{enabled:true,mode:'all',tools:oldKnowledge},unrelated:{enabled:false,mode:'custom',tools:['unrelated_exact']}}
+ const database=new Map([['a',{...doc('a'),definition:{...definition,tools,pluginBindings:bindings}}],['b',doc('b')]]),calls=[],receipts=new Map();let loseApply=false,previewDelay,applyError
+ const catalog=UNIFIED_LIBRARY_TOOLS.map(name=>({name,description:name,pluginId:LIBRARY_OWNER,pluginVersion:'0.23.1'})),projection=d=>({tools:[...d.tools],pluginBindings:structuredClone(d.pluginBindings)})
+ const api=async(method,args)=>{
+  calls.push({method,args})
+  if(method==='bootstrap')return {agents:[...database.values()],presets:[],cwd:'/workspace',capabilityBindings:true}
+  if(method==='models')return []
+  if(method==='history')return {runs:[],evaluations:[]}
+  if(method==='catalog')return {tools:catalog,skills:[],capabilityBindings:true}
+  if(method==='ownerMigrationPreview'){
+   if(previewDelay)await previewDelay.promise
+   const current=database.get(args.id),selected=args.policy==='current'?[...UNIFIED_LIBRARY_TOOLS]:[...current.definition.tools],after={tools:selected,pluginBindings:{[LIBRARY_OWNER]:{enabled:true,mode:'custom',tools:selected},unrelated:bindings.unrelated}}
+   const latest=[...receipts.values()].filter(value=>value.receipt.agentId===args.id).at(-1)?.receipt;return {version:1,status:current.definition.pluginBindings?.[LEGACY_KNOWLEDGE_OWNER]?'ready':'not-needed',...latest?{receipt:structuredClone(latest)}:{},id:args.id,revision:args.revision,permissionHash:'saved-permissions',catalogHash:'current-catalog',policy:args.policy,before:projection(current.definition),after,added:selected.filter(x=>!current.definition.tools.includes(x)),removed:[],disabledBindings:{unrelated:bindings.unrelated},reasons:[],affectedOwners:[LEGACY_KNOWLEDGE_OWNER,LIBRARY_OWNER]}
+  }
+  if(method==='ownerMigrationApply'){
+   if(applyError){const failure=applyError;applyError=null;throw failure}const prior=receipts.get(args.operationId);if(prior?.receipt.status==='undone')throw Object.assign(Error('migration already undone'),{code:'MIGRATION_UNDONE'});if(prior?.receipt.status==='undo-prepared')throw Object.assign(Error('migration undo pending'),{code:'MIGRATION_UNDO_PENDING'});if(prior&&prior.receipt.status!=='prepared')return structuredClone(prior)
+   const current=database.get(args.id);if(current.revision!==args.revision)throw Object.assign(Error('revision conflict'),{code:'REVISION_CONFLICT'})
+   const selected=args.policy==='current'?[...UNIFIED_LIBRARY_TOOLS]:[...current.definition.tools],after={tools:selected,pluginBindings:{[LIBRARY_OWNER]:{enabled:true,mode:'custom',tools:selected},unrelated:bindings.unrelated}},next={...current,revision:current.revision+1,definition:{...current.definition,...after}},receipt={id:args.operationId,agentId:args.id,status:'applied',before:projection(current.definition),after,sourceRevision:current.revision,appliedRevision:next.revision,policy:args.policy,permissionHash:args.permissionHash,catalogHash:args.catalogHash}
+   database.set(args.id,next);const result={document:next,receipt};receipts.set(args.operationId,structuredClone(result));if(loseApply){loseApply=false;throw Error('synthetic connection lost after commit')}return result
+  }
+  if(method==='ownerMigrationUndo'){
+   const old=receipts.get(args.operationId),current=database.get(args.id),next={...current,revision:current.revision+1,definition:{...current.definition,...old.receipt.before}},receipt={...old.receipt,status:'undone',undoOperationId:args.undoOperationId};database.set(args.id,next);receipts.set(args.operationId,{document:next,receipt});return {document:next,receipt}
+  }
+  throw Error(method)
+ }
+ const c=new StudioController(api)
+ return {c,calls,database,bindings,receipts,api,failApply(error){applyError=error},async open(){await c.refresh();await c.open('a')},loseNextApply(){loseApply=true},delayPreview(value){previewDelay=value}}
+}
+
+test('legacy Library catalog refresh keeps all 12 saved tools without mutation; preview is read-only and defaults to saved',async()=>{
+ const f=migrationSetup();await f.open();const before=structuredClone(f.database.get('a')),c=f.c
+ assert.equal(c.getSnapshot().draft.tools.length,12);assert.equal(c.getSnapshot().status,'saved');assert.equal(c.ownerMigrationNeeded(),true)
+ await c.refreshCatalog();assert.equal(c.getSnapshot().draft.tools.length,12);assert.equal(f.calls.some(x=>/Apply|Undo|save/.test(x.method)),false)
+ await c.ownerMigrationPreview();assert.equal(c.getSnapshot().ownerMigration.preview.policy,'saved');assert.deepEqual(c.getSnapshot().ownerMigration.preview.added,[]);assert.deepEqual(f.database.get('a'),before);assert.equal(c.getSnapshot().draft.pluginBindings[LIBRARY_OWNER].mode,'all')
+ await c.ownerMigrationPreview('current');assert.equal(c.getSnapshot().ownerMigration.preview.added.length,3);assert.equal(c.getSnapshot().draft.tools.length,12);assert.deepEqual(f.database.get('a'),before);c.dispose()
+})
+test('service-parsed definitions with different flat and binding tool order remain saved and load their durable migration receipt',async()=>{
+ const f=migrationSetup();await f.open();await f.c.ownerMigrationPreview('current');await f.c.ownerMigrationApply();f.c.dispose()
+ const source=f.database.get('a'),original=Definition.parse({...source.definition,connectorBindings:{second:'two',first:'one'}})
+ // This is the ordering produced by the real service: the flat cache retains
+ // historical read tools first; the merged binding lists Library's core first.
+ original.tools=[...UNIFIED_LIBRARY_TOOLS.slice(10),...UNIFIED_LIBRARY_TOOLS.slice(0,10)]
+ original.pluginBindings[LIBRARY_OWNER].tools=[...UNIFIED_LIBRARY_TOOLS]
+ const stored={...source,definition:original};f.database.set('a',stored);const snapshot=structuredClone(stored)
+ const c=new StudioController(f.api),before=f.calls.filter(call=>call.method==='ownerMigrationPreview').length;await c.refresh();await c.open('a');let s=c.getSnapshot()
+ assert.notDeepEqual(s.draft.tools,s.document.definition.tools,'fixture must reproduce the actual cache/binding ordering difference');assert.deepEqual([...s.draft.tools].sort(),[...s.document.definition.tools].sort());assert.equal(s.status,'saved');assert.ok(f.calls.filter(call=>call.method==='ownerMigrationPreview').length>before);assert.equal(s.ownerMigration.receipt.status,'applied');assert.equal(s.ownerMigration.receipt.before.tools.length,12);assert.equal(s.ownerMigration.receipt.after.tools.length,15);assert.equal(s.ownerMigration.preview.status,'not-needed');assert.deepEqual(f.database.get('a'),snapshot)
+ const reordered=Object.fromEntries(Object.entries(s.draft).reverse());reordered.connectorBindings={first:'one',second:'two'};assert.equal(c.configurationStatus(reordered,s.pluginSelection,s.pluginSavedSelection),'saved')
+ c.change({systemPrompt:s.draft.systemPrompt+' '});assert.equal(c.getSnapshot().status,'dirty');c.change({systemPrompt:s.document.definition.systemPrompt});assert.equal(c.getSnapshot().status,'saved');c.change({model:'different-model'});assert.equal(c.getSnapshot().status,'dirty');assert.deepEqual(f.database.get('a'),snapshot);c.dispose()
+})
+test('explicit migration adopts exact custom scope and preserves disabled owners; undo uses the recorded operation only',async()=>{
+ const f=migrationSetup();await f.open();const c=f.c;await c.ownerMigrationPreview();await c.ownerMigrationApply()
+ const s=c.getSnapshot();assert.equal(s.document.revision,2);assert.equal(s.draft.tools.length,12);assert.equal(s.draft.pluginBindings[LIBRARY_OWNER].mode,'custom');assert.equal(Object.hasOwn(s.draft.pluginBindings[LIBRARY_OWNER],'contract'),false);assert.deepEqual(s.draft.pluginBindings.unrelated,f.bindings.unrelated);assert.equal(c.ownerMigrationNeeded(),false)
+ const call=f.calls.find(x=>x.method==='ownerMigrationApply');assert.equal(call.args.policy,'saved');assert.equal(Object.hasOwn(call.args,'definition'),false);assert.equal(Object.hasOwn(call.args,'systemPrompt'),false)
+ await c.ownerMigrationUndo();assert.equal(c.getSnapshot().document.revision,3);assert.equal(c.getSnapshot().ownerMigration.receipt.status,'undone');assert.deepEqual(c.getSnapshot().draft.pluginBindings,f.bindings);assert.equal(c.getSnapshot().draft.tools.length,12);c.dispose()
+})
+test('an unknown apply outcome retries the same operation without broadening or duplicating migration',async()=>{
+ const f=migrationSetup();await f.open();const c=f.c;await c.ownerMigrationPreview();f.loseNextApply();await assert.rejects(c.ownerMigrationApply(),/connection lost/)
+ const request=c.getSnapshot().ownerMigration.pendingApply;assert.ok(request.operationId);await assert.rejects(c.ownerMigrationPreview('current'),/尚未核对/)
+ await c.ownerMigrationApply();const calls=f.calls.filter(x=>x.method==='ownerMigrationApply');assert.equal(calls.length,2);assert.deepEqual(calls[0].args,calls[1].args);assert.equal(c.getSnapshot().document.revision,2);assert.equal(c.getSnapshot().draft.tools.length,12);assert.equal(c.getSnapshot().ownerMigration.pendingApply,null);c.dispose()
+})
+test('recovering an unknown migration keeps unsaved persona edits and merges only the unchanged permission projection',async()=>{
+ const f=migrationSetup();await f.open();const c=f.c;f.loseNextApply();await assert.rejects(c.ownerMigrationApply(),/connection lost/)
+ const request=structuredClone(c.getSnapshot().ownerMigration.pendingApply);c.change({systemPrompt:'unsaved persona',model:'unsaved-model',description:'unsaved description'})
+ await c.ownerMigrationApply();const s=c.getSnapshot();assert.equal(s.status,'dirty');assert.equal(s.draft.systemPrompt,'unsaved persona');assert.equal(s.draft.model,'unsaved-model');assert.equal(s.draft.description,'unsaved description');assert.deepEqual(s.draft.tools,s.document.definition.tools);assert.deepEqual(s.draft.pluginBindings,s.document.definition.pluginBindings);assert.equal(s.draft.pluginBindings[LIBRARY_OWNER].mode,'custom');assert.equal(s.document.definition.systemPrompt,'old');assert.equal(s.ownerMigration.pendingApply,null)
+ assert.deepEqual(f.calls.filter(call=>call.method==='ownerMigrationApply').map(call=>call.args),[request,request]);assert.equal(f.calls.some(call=>call.method==='save'),false);c.dispose()
+})
+test('recovering an unknown migration preserves changed local tool choices as a conflict',async()=>{
+ const f=migrationSetup();await f.open();const c=f.c;f.loseNextApply();await assert.rejects(c.ownerMigrationApply(),/connection lost/);c.change({systemPrompt:'local persona',tools:[...c.getSnapshot().draft.tools,'library_sources']});const local=structuredClone(c.getSnapshot().draft)
+ await c.ownerMigrationApply();assert.equal(c.getSnapshot().status,'conflict');assert.deepEqual(c.getSnapshot().draft,local);assert.equal(c.getSnapshot().document.definition.tools.length,12);assert.equal(c.getSnapshot().ownerMigration.pendingApply,null);c.dispose()
+})
+test('an apply replay after another window undid it reads current state without a transient grant or losing persona edits',async()=>{
+ const f=migrationSetup();await f.open();const c=f.c;await c.ownerMigrationPreview('current');f.loseNextApply();await assert.rejects(c.ownerMigrationApply(),/connection lost/);const request=structuredClone(c.getSnapshot().ownerMigration.pendingApply)
+ await f.api('ownerMigrationUndo',{id:'a',operationId:request.operationId,undoOperationId:'other-window-undo',cwd:'/workspace'});c.change({systemPrompt:'keep this local persona',model:'keep-local-model'})
+ const observed=[];const unsubscribe=c.subscribe(()=>observed.push(c.getSnapshot().draft.tools.length));await assert.rejects(c.ownerMigrationApply(),error=>error.code==='MIGRATION_UNDONE');unsubscribe()
+ const s=c.getSnapshot();assert.ok(observed.every(count=>count===12));assert.equal(s.document.revision,3);assert.equal(s.ownerMigration.receipt.status,'undone');assert.equal(s.ownerMigration.pendingApply,null);assert.equal(s.ownerMigration.preview,null);assert.equal(s.draft.systemPrompt,'keep this local persona');assert.equal(s.draft.model,'keep-local-model');assert.equal(s.status,'dirty');assert.equal(f.calls.filter(call=>call.method==='ownerMigrationUndo').length,1);assert.deepEqual(f.calls.filter(call=>call.method==='ownerMigrationApply').map(call=>call.args),[request,request]);c.dispose()
+})
+test('a replay during another window pending undo restores its original undo identity without automatically executing it',async()=>{
+ const f=migrationSetup();await f.open();const c=f.c;f.loseNextApply();await assert.rejects(c.ownerMigrationApply(),/connection lost/);const request=c.getSnapshot().ownerMigration.pendingApply,stored=f.receipts.get(request.operationId);stored.receipt={...stored.receipt,status:'undo-prepared',undoOperationId:'other-pending-undo'};c.change({systemPrompt:'unsaved while undo pending'})
+ await assert.rejects(c.ownerMigrationApply(),error=>error.code==='MIGRATION_UNDO_PENDING');assert.equal(c.getSnapshot().ownerMigration.pendingApply,null);assert.equal(c.getSnapshot().ownerMigration.pendingUndo.undoOperationId,'other-pending-undo');assert.equal(f.calls.some(call=>call.method==='ownerMigrationUndo'),false)
+ await c.ownerMigrationUndo();assert.equal(f.calls.findLast(call=>call.method==='ownerMigrationUndo').args.undoOperationId,'other-pending-undo');assert.equal(c.getSnapshot().draft.systemPrompt,'unsaved while undo pending');assert.equal(c.getSnapshot().status,'dirty');assert.equal(c.getSnapshot().ownerMigration.receipt.status,'undone');c.dispose()
+})
+test('local edits invalidate preview and a late preview cannot attach to another Agent',async()=>{
+ const f=migrationSetup();await f.open();const c=f.c;await c.ownerMigrationPreview();c.change({description:'local edit'});assert.equal(c.getSnapshot().ownerMigration.preview,null);await assert.rejects(c.ownerMigrationApply(),/先保存/)
+ await c.reload();const delay=deferred();f.delayPreview(delay);const waiting=c.ownerMigrationPreview();await c.open('b');delay.resolve();await waiting;assert.equal(c.getSnapshot().document.id,'b');assert.equal(c.getSnapshot().ownerMigration,null);assert.equal(f.calls.some(x=>x.method==='ownerMigrationApply'),false);c.dispose()
+})
+test('reloading reads persisted migration receipts and restores Undo without using a browser-only receipt',async()=>{
+ const f=migrationSetup();await f.open();await f.c.ownerMigrationApply();const operation=f.c.getSnapshot().ownerMigration.receipt.id;f.c.dispose()
+ const next=new StudioController(f.api);await next.refresh();await next.open('a');assert.equal(next.ownerMigrationNeeded(),false);assert.equal(next.getSnapshot().ownerMigration.receipt.id,operation);assert.equal(next.getSnapshot().ownerMigration.receipt.status,'applied');await next.ownerMigrationUndo();assert.equal(f.calls.findLast(call=>call.method==='ownerMigrationUndo').args.operationId,operation);next.dispose()
+})
+test('prepared receipts restore exact pending request identities without automatic apply or undo',async()=>{
+ const f=migrationSetup(),id='saved-operation',before={tools:f.database.get('a').definition.tools,pluginBindings:f.bindings},receipt={id,agentId:'a',status:'prepared',policy:'current',sourceRevision:1,permissionHash:'original-hash',catalogHash:'original-catalog',before,after:before}
+ f.receipts.set(id,{receipt});await f.open();let state=f.c.getSnapshot().ownerMigration
+ assert.deepEqual(state.pendingApply,{id:'a',revision:1,cwd:'/workspace',policy:'current',permissionHash:'original-hash',catalogHash:'original-catalog',operationId:id});assert.equal(f.calls.some(call=>call.method==='ownerMigrationApply'),false)
+ f.receipts.set(id,{receipt:{...receipt,status:'undo-prepared',undoOperationId:'saved-undo'}});f.c.tabs.clear();await f.c.reload();state=f.c.getSnapshot().ownerMigration;assert.equal(state.pendingUndo.undoOperationId,'saved-undo');assert.equal(state.pendingUndo.operationId,id);assert.equal(f.calls.some(call=>call.method==='ownerMigrationUndo'),false);f.c.dispose()
+})
+test('a definitive migration conflict clears local retry state and requires another explicit preview',async()=>{
+ const f=migrationSetup();await f.open();f.failApply(Object.assign(Error('catalog changed'),{code:'MIGRATION_PREVIEW_CHANGED'}));await assert.rejects(f.c.ownerMigrationApply(),/catalog changed/)
+ const state=f.c.getSnapshot().ownerMigration;assert.equal(state.pendingApply,null);assert.equal(state.preview,null);assert.match(state.error,/不会自动更换/);assert.equal(f.calls.filter(call=>call.method==='ownerMigrationApply').length,1);await assert.rejects(f.c.ownerMigrationApply(),/先读取/);f.c.dispose()
+})
+test('a restored pending request cannot target a different Agent and a mismatched operation receipt is not accepted',async()=>{
+ const f=migrationSetup();await f.open();const c=f.c,state=c.getSnapshot().ownerMigration,request={id:'b',revision:1,cwd:'/workspace',policy:'saved',permissionHash:'saved-permissions',catalogHash:'current-catalog',operationId:'foreign'}
+ c.publish({ownerMigration:{...state,pendingApply:request}});await assert.rejects(c.ownerMigrationApply(),/身份不匹配/);assert.equal(f.calls.some(call=>call.method==='ownerMigrationApply'),false)
+ await c.ownerMigrationPreview();const submitted=c.getSnapshot(),docBefore=structuredClone(submitted.document)
+ await assert.rejects(c.acceptOwnerMigration({document:{...docBefore,revision:2},receipt:{id:'another-operation',agentId:'a',status:'applied',sourceRevision:1,policy:'saved',permissionHash:'saved-permissions',catalogHash:'current-catalog'}},submitted,{...request,id:'a',operationId:'expected'},'apply'),/回执身份/)
+ assert.deepEqual(c.getSnapshot().document,docBefore);await c.ownerMigrationApply();const after=c.getSnapshot();c.publish({ownerMigration:{...after.ownerMigration,pendingUndo:{id:'b',operationId:after.ownerMigration.receipt.id,undoOperationId:'foreign-undo',cwd:'/workspace'}}});await assert.rejects(c.ownerMigrationUndo(),/身份不匹配/);assert.equal(f.calls.some(call=>call.method==='ownerMigrationUndo'),false);c.dispose()
+})
 test('late preset selection cannot replace later tab',async()=>{const d=deferred(),c=setup({readPreset:()=>d.promise});const first=c.open('preset');await c.open('b');d.resolve({...doc('preset'),readOnly:true});await first;assert.equal(c.getSnapshot().document.id,'b');c.dispose()})
 test('same-tab history uses last selection despite reversed responses',async()=>{const a=deferred(),b=deferred(),c=setup({getRun:({id})=>id==='a'?a.promise:b.promise});const p=c.openRun('a'),q=c.openRun('b');b.resolve(run('b'));await q;a.resolve(run('a'));await p;assert.equal(c.getSnapshot().runState.run.id,'b');c.dispose()})
 test('save deduplicates and retains edits made during request',async()=>{const d=deferred();let calls=0;const c=setup({save:()=>{calls++;return d.promise}});const p=c.save(),q=c.save();c.change({systemPrompt:'new'});d.resolve({...doc('a'),revision:2});await Promise.all([p,q]);assert.equal(calls,1);assert.equal(c.getSnapshot().draft.systemPrompt,'new');assert.equal(c.getSnapshot().status,'dirty');c.dispose()})

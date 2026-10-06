@@ -31,6 +31,8 @@ export interface PluginCapability {
   version?: string
   installed?: boolean
   discovery: 'known-registration' | 'host-registry' | 'unassigned'
+  unifiedLibrary?: boolean
+  migrationOnly?: boolean
 }
 export interface PluginChoice {
   enabled: boolean
