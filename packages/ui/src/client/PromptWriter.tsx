@@ -6,14 +6,14 @@ import type { EditorSnapshot } from './controller.ts'
 import type { PromptController } from './prompt-controller.ts'
 import type {} from './prompt.locale.ts'
 import css from './PromptWriter.module.css'
-import workbench from './Workbench.module.css'
+import workbench from './AgentStudio.module.css'
 
 /** Existing editor labels stay with its locale; authoring owns only its added controls. */
 export interface PromptWriterProps extends PropsLocale<'agentStudioPrompt'> {
   writer: PromptController
   editor: EditorSnapshot
   label: string
-  hint: string
+  hint?: string
   placeholder: string
   onChange: (value: string) => void
 }
@@ -70,6 +70,6 @@ export function PromptWriter({ writer, editor, label, hint, placeholder, onChang
     {state.applied === prompt && state.previous !== null && <div className={css.applied}><span role="status">{t('applied')}</span><Button size="sm" shape="rounded" onClick={writer.restore}>{t('restore')}</Button></div>}
     {state.open && !readOnly && <span className={css.label}>{t('original')}</span>}
     <textarea readOnly={readOnly} id={`${id}-original`} spellCheck={false} placeholder={placeholder} value={prompt} onChange={(event) => { onChange(event.currentTarget.value) }} />
-    <p className={workbench.hint}>{hint}</p>
+    {hint && <p className={workbench.hint}>{hint}</p>}
   </div>
 }

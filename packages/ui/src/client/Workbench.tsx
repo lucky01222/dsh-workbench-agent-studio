@@ -13,15 +13,18 @@ import { TrialPane } from './TrialPane.tsx'
 import { TrialToolbar } from './TrialToolbar.tsx'
 import { HistoryPane } from './HistoryPane.tsx'
 import { RecordsPane } from './RecordsPane.tsx'
-import css from './Workbench.module.css'
+import css from './AgentStudio.module.css'
 import { PluginPicker } from './PluginPicker.tsx'
 import { PluginCapabilitySummary } from './PluginCapabilitySummary.tsx'
+import { SkillSummary } from './SkillSummary.tsx'
+import { SkillPicker } from './SkillPicker.tsx'
+import { skillGroups } from './skill-groups.mjs'
 import {OwnerMigrationNotice} from './OwnerMigrationNotice.tsx'
-import { buildPluginCatalog, clonePluginSelection, selectionFromTools, chosenPluginTools, summarizePluginSelection } from './plugin-capabilities.mjs'
+import { buildPluginCatalog, clonePluginSelection, selectionFromTools } from './plugin-capabilities.mjs'
 import type { PluginCapability, PluginSelection } from './plugin-capabilities.types.ts'
 import type { Key } from './locales.ts'
 
-type Dialog = 'create' | 'tools' | 'skills' | 'plugins' | 'capability-check' | 'delete' | 'reload' | null
+type Dialog = 'create' | 'tools' | 'skills' | 'plugins' | 'delete' | 'reload' | null
 
 function OperationError({ error, t }: { error: string | null; t: WorkbenchProps['t'] }) {
   return error ? <div className={css.dialogError} role="alert"><span>{t('errorTitle')}</span>
@@ -29,9 +32,10 @@ function OperationError({ error, t }: { error: string | null; t: WorkbenchProps[
   </div> : null
 }
 /** Render the managed Agent editor with framework-derived state and actions. */
-export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly PluginCapability[]; changePluginSelection?: (selection: PluginSelection) => void;ownerMigrationNeeded?:boolean;previewOwnerMigration?:(policy:'saved'|'current')=>Promise<unknown>;applyOwnerMigration?:()=>Promise<unknown>;undoOwnerMigration?:()=>Promise<unknown> }) {
+export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly PluginCapability[]; changePluginSelection?: (selection: PluginSelection) => void;ownerMigrationNeeded?:boolean;previewOwnerMigration?:(policy:'saved'|'current')=>Promise<unknown>;updateOwnerMigration?:()=>Promise<unknown>;applyOwnerMigration?:()=>Promise<unknown>;undoOwnerMigration?:()=>Promise<unknown> }) {
   const state = props.useEditor(s => s), view = props.useStore(s => s), records = props.useRecords(s => s), { t } = props
   const [pluginDetailId, setPluginDetailId] = useState<string | undefined>();
+  const [skillGroupId, setSkillGroupId] = useState<string | undefined>()
   const [dialog, setDialog] = useState<Dialog>(null), [search, setSearch] = useState(''), [newName, setNewName] = useState('')
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const [startingConversation, setStartingConversation] = useState(false), [actionError, setActionError] = useState<string | null>(null)
@@ -53,7 +57,7 @@ export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly Plu
   const plugins = props.pluginCatalog ?? buildPluginCatalog(state.catalog?.tools ?? [])
   const pluginSelection: PluginSelection = state.pluginSelection ?? selectionFromTools(draft?.tools ?? [], plugins)
   const pluginT = (key: string, values?: Record<string, string | number>) => t(key as Key, values)
-  const pluginSummary = summarizePluginSelection(pluginSelection, plugins)
+  const skillGroupRows = skillGroups(state.catalog?.skills ?? null, draft?.skills ?? [], plugins)
   const openPlugins = (pluginId?: string) => { setPluginDetailId(pluginId); openDialog('plugins') }
   const changePlugins = (selection: PluginSelection) => { if (props.changePluginSelection) props.changePluginSelection(selection) }
   const removePlugins = (ids: readonly string[]) => { const next = clonePluginSelection(pluginSelection); for (const pluginId of ids) if (next[pluginId]) next[pluginId].enabled = false; changePlugins(next) }
@@ -61,6 +65,8 @@ export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly Plu
     { label: 'builtinAgents' as const, rows: state.roster.presets.filter(row => row.builtIn) }]
   const canRunModel = draft?.modelSelection === 'global' ? !!state.models?.default : !!draft?.provider && !!draft.model
   const model = state.models?.groups.find(group => group.id === draft?.provider)?.models.find(item => item.id === draft?.model)
+  const defaultModel = state.models?.default
+  const defaultModelName = defaultModel?.model ? state.models?.groups.find(group => group.id === defaultModel.provider)?.models.find(item => item.id === defaultModel.model)?.name ?? defaultModel.model : undefined
   const invoke = (work: Promise<unknown>) => { void work.catch(() => {}) } // Controller retains actionable errors and unsaved edits.
   const open = (agent: string) => {
     setAgentMenuOpen(false)
@@ -174,7 +180,6 @@ export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly Plu
                 onSelect={(action) => { setAgentMenuOpen(false); if (action === 'duplicate') invoke(props.duplicateAgent(t('copyName', { name: draft.name }))); else openDialog('delete') }} />}
             </header>
             <div className={css.configScroll}>
-              {readOnly && <p className={css.hint}>{t('builtinHint')}</p>}
               {runtime && <details className={css.metadata}><summary>{t('runtimeRules')}</summary><p className={css.hint}>{t('runtimeSource', { source: runtime.source })}</p>{runtime.toolPresentation && <p className={css.hint}>{t(runtime.toolPresentation === 'ptc' ? 'runtimePtc' : runtime.toolPresentation === 'both' ? 'runtimeBoth' : 'runtimeNative')}</p>}<p className={css.hint}>{t('promptComposed')}</p></details>}
               <div className={css.field}><label htmlFor={`${id}-model`}>{t('model')}</label><select disabled={readOnly} id={`${id}-model`} className={css.select} value={draft.modelSelection === 'unset' || draft.modelSelection === 'global' ? draft.modelSelection : JSON.stringify([draft.provider, draft.model])} onChange={(event) => {
                 const value = event.currentTarget.value
@@ -184,37 +189,34 @@ export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly Plu
                 else { const [provider, modelId] = JSON.parse(value) as [string,string]; props.changeDefinition({ modelSelection: 'explicit', provider, model: modelId, reasoningEffort: undefined }) }
               }}>
                 <option value="unset">{t('chooseModel')}</option>
-                <option value="global">{t('globalModel')}</option>
+                <option value="global">{defaultModelName ? t('globalModelNamed', { model: defaultModelName }) : t('globalModel')}</option>
                 {!model && !!draft.model && <option value={JSON.stringify([draft.provider, draft.model])}>
-                  {draft.provider} / {draft.model}
+                  {t('modelUnlisted', { model: `${draft.provider} / ${draft.model}` })}
                 </option>}
                 {state.models?.groups.map(group => <optgroup label={group.name} key={group.id}>
                   {group.models.map(item => <option key={item.id} value={JSON.stringify([group.id, item.id])}>{item.name}</option>)}
                 </optgroup>)}
-              </select></div>
-              {!canRunModel && <p className={css.hint}>{t('modelRequired')}</p>}
-              {draft.modelSelection === 'global' && state.models?.default && <p className={css.hint}>{state.models.default.provider} / {state.models.default.model}</p>}
+              </select>{!canRunModel && <p className={clsx(css.hint, css.fieldHint)}>{t('modelRequired')}</p>}</div>
               {model?.reasoning && <div className={css.field}><label htmlFor={`${id}-effort`}>{t('reasoning')}</label><select disabled={readOnly} id={`${id}-effort`} className={css.select} value={draft.reasoningEffort ?? ''} onChange={(event) => { props.changeDefinition({ reasoningEffort: event.currentTarget.value || undefined }) }}><option value="">{t('defaultEffort')}</option>{model.reasoning.efforts.map(effort => <option key={effort.id} value={effort.id}>{effort.name}</option>)}</select></div>}
               <div className={css.capabilities}>
                 <div className={css.capability}><label>{t('pluginCapabilitiesLabel')}</label><div>
                   <PluginCapabilitySummary catalog={plugins} selection={pluginSelection} readOnly={readOnly} loading={state.catalogLoading}
                     t={pluginT} onOpen={openPlugins} onRemove={removePlugins} />
-                  {!readOnly && <p className={css.hint}>{t(state.capabilityBindings ? 'pluginServerHint' : 'pluginFrontendHint')}</p>}
+                  {!readOnly && !state.capabilityBindings && <p className={css.hint}>{t('pluginFrontendHint')}</p>}
                   {state.pluginStorageWarning && <p className={css.hint} role="status">{t('pluginStorageWarning')}</p>}
                   {state.pluginDirectoryError && <details className={css.pluginWarning}><summary>{t('pluginDirectoryWarning')}</summary><p>{state.pluginDirectoryError}</p></details>}
-                  {!readOnly&&props.previewOwnerMigration&&props.applyOwnerMigration&&props.undoOwnerMigration&&<OwnerMigrationNotice needed={props.ownerMigrationNeeded===true} state={state.ownerMigration} recoveryDisabled={state.busy||state.executingToolIds.length>0||['running','preparing'].includes(state.runState?.run?.status||'')} disabled={state.busy||state.status!=='saved'||state.executingToolIds.length>0||['running','preparing'].includes(state.runState?.run?.status||'')} t={pluginT} onPreview={policy=>invoke(props.previewOwnerMigration!(policy))} onApply={()=>invoke(props.applyOwnerMigration!())} onUndo={()=>invoke(props.undoOwnerMigration!())}/>}
+                  {!readOnly&&props.updateOwnerMigration&&props.applyOwnerMigration&&props.undoOwnerMigration&&<OwnerMigrationNotice needed={props.ownerMigrationNeeded===true} state={state.ownerMigration} recoveryDisabled={state.busy||state.executingToolIds.length>0||['running','preparing'].includes(state.runState?.run?.status||'')} disabled={state.busy||state.status!=='saved'||state.executingToolIds.length>0||['running','preparing'].includes(state.runState?.run?.status||'')} t={pluginT} onUpdate={()=>invoke(props.updateOwnerMigration!())} onApply={()=>invoke(props.applyOwnerMigration!())} onUndo={()=>invoke(props.undoOwnerMigration!())}/>}
                 </div></div>
-                <div className={css.capability}><label>{t('skills')}</label><div className={css.chips}>
-                  {draft.skills.length ? draft.skills.map(name => <Pill appearance="tag" key={name} title={name} onClick={() => { openDialog('skills') }}
-                    {...!readOnly ? { removal: { label: t('removeSkill', { name }), onRemove: () => { props.changeDefinition({ skills: draft.skills.filter(value => value !== name) }) } } } : {}}>{name}</Pill>) : <span className={css.muted}>{t('none')}</span>}
-                  <Button size="sm" icon={readOnly ? undefined : <IconPlusOutline16 />} onClick={() => { openDialog('skills') }}>{t(readOnly ? 'viewCapabilities' : 'add')}</Button>
+                <div className={css.capability}><label>{t('skills')}</label><div>
+                  <SkillSummary groups={skillGroupRows} selected={draft.skills} readOnly={readOnly} loading={state.catalogLoading} t={pluginT}
+                    onOpen={groupId => { setSkillGroupId(groupId); openDialog('skills') }} onRemove={names => { props.changeDefinition({ skills: draft.skills.filter(name => !names.includes(name)) }) }} />
                 </div></div>
                 {(draft.tools.some(name => name.startsWith('openconnector/')) || state.catalog?.tools.some(tool => tool.source === 'openconnector')) && <div className={css.capability}><label>{t('connectorTab')}</label><div className={css.chips}>
                   <span className={css.muted}>{t('pluginExternalSummary', { count: draft.tools.filter(name => name.startsWith('openconnector/')).length })}</span>
                   <Button size="sm" onClick={() => { setToolSource('openconnector'); openDialog('tools') }}>{t(readOnly ? 'viewCapabilities' : 'add')}</Button>
                 </div></div>}
               </div>
-              <PromptWriter writer={props.promptWriter} editor={state} label={t(runtime ? 'rolePrompt' : 'prompt')} hint={t(runtime ? 'presetPromptHint' : 'promptHint')} placeholder={t('promptPlaceholder')} t={props.promptT} onChange={(systemPrompt) => { props.changeDefinition({ systemPrompt }) }} />
+              <PromptWriter writer={props.promptWriter} editor={state} label={t(runtime ? 'rolePrompt' : 'prompt')} placeholder={t('promptPlaceholder')} t={props.promptT} onChange={(systemPrompt) => { props.changeDefinition({ systemPrompt }) }} />
               <details className={css.metadata}><summary>{t('agentDetails')}</summary>
                 <div className={css.field}><label htmlFor={`${id}-name`}>{t('name')}</label><Input readOnly={readOnly} id={`${id}-name`} maxLength={120} value={draft.name} onChange={(event) => { props.changeDefinition({ name: event.currentTarget.value }) }} /></div>
                 <div className={css.field}><label htmlFor={`${id}-description`}>{t('description')}</label><Input readOnly={readOnly} id={`${id}-description`} maxLength={1000} value={draft.description} onChange={(event) => { props.changeDefinition({ description: event.currentTarget.value }) }} /></div>
@@ -230,7 +232,7 @@ export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly Plu
           </section>
           <div className={css.separator} role="separator" tabIndex={0} aria-label={t('resize')} aria-orientation="vertical" aria-valuemin={30} aria-valuemax={70} aria-valuenow={view.split} title={t('resizeHint', { percent: Math.round(view.split) })} onDoubleClick={() => { props.actions.update({ split: 50 }) }} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); props.actions.update({ split: Math.max(30, Math.min(70, view.split + (event.key === 'ArrowRight' ? 2 : -2))) }) } }} onPointerDown={(event) => { if(event.button !== 0)return;event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);event.currentTarget.dataset.dragging='true' }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { const rect = splitRef.current?.getBoundingClientRect(); if (rect) props.actions.update({ split: Math.max(30, Math.min(70, (event.clientX - rect.left) / rect.width * 100)) }) } }} onPointerUp={(event) => { delete event.currentTarget.dataset.dragging;if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }} onLostPointerCapture={event=>{delete event.currentTarget.dataset.dragging}} onPointerCancel={event=>{delete event.currentTarget.dataset.dragging}} />
           <section className={css.right}>
-            <header className={css.paneHeader}><strong className={css.heading}>{t(view.rightTab === 'history' ? 'history' : 'trial')}</strong><Button size="sm" disabled={!draft} onClick={() => { setDialog('capability-check') }}>{t('pluginCheckAction')}</Button>
+            <header className={css.paneHeader}><strong className={css.heading}>{t(view.rightTab === 'history' ? 'history' : 'trial')}</strong>
               <TrialToolbar toolsRunning={state.executingToolIds.length > 0} runState={state.runState} input={state.input} busy={state.busy} canRun={!state.executingToolIds.length && state.status !== 'conflict' && canRunModel && !!state.cwd.trim()} onRun={() => { props.actions.update({ rightTab: 'trial', panel: 'trial' }); invoke(props.startRun()) }} onStop={() => { invoke(props.stopRun()) }} t={props.trialT} settings={state.settings} onSettingsChange={props.changeSettings} undoable={state.undoable} redoable={state.redoable} onUndo={props.undoMessages} onRedo={props.redoMessages} onClear={props.clearRun} onShowHistory={() => { props.actions.update({ rightTab: 'history' }); invoke(props.refreshHistory()) }} />
             </header>
             <nav className={css.rightTabs} hidden={view.rightTab === 'trial'}><Pill active={view.rightTab === 'trial'} onClick={() => { props.actions.update({ rightTab: 'trial' }) }}>{t('trial')}</Pill><Pill active={view.rightTab === 'history'} onClick={() => { props.actions.update({ rightTab: 'history' }); invoke(props.refreshHistory()) }}>{t('history')}</Pill></nav>
@@ -244,18 +246,10 @@ export function Workbench(props: WorkbenchProps & { pluginCatalog?: readonly Plu
       loading={state.catalogLoading} error={state.error} initialPluginId={pluginDetailId} selectedSkills={draft?.skills ?? []}
       t={pluginT} onRefresh={() => { invoke(props.refreshCatalog()) }} onClose={() => { setDialog(null) }}
       onComplete={selection => { changePlugins(selection); setDialog(null) }} />
-    <Modal open={dialog === 'capability-check'} title={t('pluginCheckTitle')} closeLabel={t('close')} onClose={() => { setDialog(null) }}
-      footer={<Button variant="primary" onClick={() => { setDialog(null) }}>{t('close')}</Button>}>
-      <div className={css.pluginCheck}><p className={css.hint}>{t('pluginCheckHint')}</p><p className={css.hint}>{t('pluginPickerSummary', { plugins: pluginSummary.plugins, tools: pluginSummary.tools })}</p>
-        {plugins.filter(plugin => pluginSelection[plugin.id]?.enabled).map(plugin => <section key={plugin.id} className={css.pluginCheckRow}>
-          <strong>{plugin.nameKey ? pluginT(plugin.nameKey) : plugin.name}</strong><span>{t('pluginPickerToolCount', { count: chosenPluginTools(plugin, pluginSelection).length })}</span>
-          {plugin.reasonKey && <p className={css.hint}>{pluginT(plugin.reasonKey)}</p>}
-          {plugin.requiresContext && <p className={css.hint}>{t('pluginPickerContext', { context: plugin.requiresContext })}</p>}
-          <details><summary>{t('pluginCheckTools')}</summary><pre>{chosenPluginTools(plugin, pluginSelection).map(tool => tool.name).join('\n')}</pre></details>
-        </section>)}
-      </div>
-    </Modal>
-    <Modal open={dialog === 'tools' || dialog === 'skills'} className={clsx(dialog === 'tools' ? css.catalogDialog : css.skillsDialog)} {...dialog === 'tools' ? { contentClassName: css.catalogContent } : {}} footer={<>{!(dialog === 'tools' && toolSource === 'openconnector') && <Button disabled={state.catalogLoading || !state.cwd.trim()} onClick={() => { void props.refreshCatalog().catch(() => {}) }}>{t('refreshCatalog')}</Button>}<Button variant="primary" onClick={() => { setDialog(null) }}>{t('close')}</Button></>} title={t(dialog === 'skills' ? 'selectSkills' : 'selectTools')} description={t(dialog === 'skills' ? 'skillsHint' : 'selectHint')} closeLabel={t('close')} onClose={() => { setDialog(null) }}>
+    <SkillPicker open={dialog === 'skills'} groups={skillGroupRows} selected={draft?.skills ?? []} readOnly={readOnly} loading={state.catalogLoading} initialGroupId={skillGroupId}
+      notice={!state.cwd.trim() ? t('catalogNeedsDirectory') : !state.catalog && !state.catalogLoading ? t('catalogMissing') : null} t={pluginT}
+      onRefresh={() => { invoke(props.refreshCatalog()) }} onClose={() => { setDialog(null) }} onComplete={names => { props.changeDefinition({ skills: names }); setDialog(null) }} />
+    <Modal open={dialog === 'tools'} className={clsx(dialog === 'tools' ? css.catalogDialog : css.skillsDialog)} {...dialog === 'tools' ? { contentClassName: css.catalogContent } : {}} footer={<>{!(dialog === 'tools' && toolSource === 'openconnector') && <Button disabled={state.catalogLoading || !state.cwd.trim()} onClick={() => { void props.refreshCatalog().catch(() => {}) }}>{t('refreshCatalog')}</Button>}<Button variant="primary" onClick={() => { setDialog(null) }}>{t('close')}</Button></>} title={t(dialog === 'skills' ? 'selectSkills' : 'selectTools')} description={t(dialog === 'skills' ? 'skillsHint' : 'selectHint')} closeLabel={t('close')} onClose={() => { setDialog(null) }}>
       <div className={css.dialogBody}>
         {state.connectorAvailable && dialog === 'tools' && <nav className={css.connectorActions} aria-label={t('toolSource', { source: '' })}><Pill active={toolSource === 'local'} onClick={() => { setToolSource('local') }}>{t('localToolsTab')}</Pill><Pill active={toolSource === 'openconnector'} onClick={() => { setToolSource('openconnector') }}>{t('connectorTab')}</Pill></nav>}
         {dialog === 'tools' && toolSource === 'openconnector' ? <ConnectorPicker t={t} useConnector={props.useConnector} connectorLoad={props.connectorLoad} connectorSearch={props.connectorSearch} connectorRestart={props.connectorRestart} connectorConsole={props.connectorConsole} draft={draft} readOnly={readOnly} toggle={props.connectorToggle} bind={props.connectorBind} /> : <div className={dialog === 'tools' ? css.catalogLayout : css.dialogBody}>

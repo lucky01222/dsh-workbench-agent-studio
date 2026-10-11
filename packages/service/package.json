@@ -1,6 +1,6 @@
 {
   "name": "dsh-workbench-agent-studio-service",
-  "version": "1.10.1",
+  "version": "1.11.2",
   "description": "Agent Studio persistent service and finite trials",
   "type": "module",
   "license": "MIT",
