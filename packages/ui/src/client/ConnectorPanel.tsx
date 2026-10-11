@@ -8,7 +8,7 @@ import type { AgentDefinition } from '@deepseek-ai/dsh-agent-presets/types'
 import type { ConnectorAction, ConnectorQuery } from '@deepseek-ai/dsh-api-agent-studio-controller/types'
 import type { ConnectorController, ConnectorSnapshot } from './connector-controller.ts'
 import type {} from './locales.ts'
-import css from './Workbench.module.css'
+import css from './AgentStudio.module.css'
 
 /** Framework binds the snapshot; components receive only business callbacks. */
 export interface ConnectorInjected {

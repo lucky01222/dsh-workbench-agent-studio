@@ -3,10 +3,14 @@
 .heading > span { min-width:0; }
 .rows { max-height:184px; overflow:auto; border-top:.5px solid var(--dsw-alias-border-l3); scrollbar-width:thin; scrollbar-color:var(--dsw-alias-border-l3) transparent; }
 .row { display:flex; align-items:center; gap:8px; min-height:44px; padding:8px 0; border-bottom:.5px solid var(--dsw-alias-border-l3); }
+/* The field row draws the closing divider. */
+.row:last-child { border-bottom:0; }
 .row > svg { flex-shrink:0; color:var(--dsw-alias-label-secondary); }
 .title { display:flex; flex:1; min-width:0; flex-direction:column; gap:3px; padding:0; border:0; background:transparent; color:inherit; text-align:left; font:inherit; cursor:pointer; }
 .title strong { font-size:13px; line-height:20px; font-weight:500; overflow-wrap:anywhere; }
 .title small { font-size:11px; line-height:17px; color:var(--dsw-alias-label-secondary); overflow-wrap:anywhere; }
+/* Skill rows list their chosen names; two lines identify them, the full list stays on hover. */
+.title .names { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
 .title:hover strong { color:var(--dsw-alias-brand-primary); }
 .title:focus-visible { outline:var(--dsw-control-focus-width) solid var(--dsw-alias-control-focus); outline-offset:var(--dsw-control-focus-offset); border-radius:var(--dsw-control-radius-input); }
 .count { flex-shrink:0; font-size:11px; line-height:18px; color:var(--dsw-alias-label-secondary); font-variant-numeric:tabular-nums; }

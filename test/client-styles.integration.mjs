@@ -63,7 +63,9 @@ test('built Studio CSS survives another plugin materializing and being replaced'
   const stop = activate()
   assert.equal(styles.length, 1)
   const studioStyle = styles[0]
-  assert.match(studioStyle.textContent, /\.Workbench_root\s*\{/)
+  assert.match(studioStyle.textContent, /\.AgentStudio_root\s*\{/)
+  // Document workbench also ships Workbench.module.css; a shared prefix let its rules restyle Studio fields.
+  assert.doesNotMatch(studioStyle.textContent, /\.Workbench_/)
   assert.equal(studioStyle.getAttribute('data-plugin'), owner)
   assert.equal(studioStyle.getAttribute('data-plugin-css'), owner)
   const foreignStyle = document.createElement('style')

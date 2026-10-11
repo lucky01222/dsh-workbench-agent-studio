@@ -93,6 +93,8 @@ export function PluginPicker({ open, catalog, selection, readOnly = false, loadi
   const summary = pluginSelectionSummary(catalog, draft)
   const bundleState = officialBundleState(catalog, draft)
   const showBundle = official.length > 0 && filter !== 'custom' && !normalizedQuery
+  const officialRows = shown.filter(plugin => plugin.origin === 'official')
+  const officialToggle = (className: string) => <button className={className} type="button" aria-expanded={officialExpanded} onClick={() => { setOfficialExpanded(value => !value) }}>{t(officialExpanded ? 'pluginPickerCollapseOfficial' : 'pluginPickerExpandOfficial', { count: official.length })}{officialExpanded ? <IconChevronUpOutline14 /> : <IconChevronDownOutline14 />}</button>
   const currentChoice = active ? draft[active.id] : undefined
   const chosen = active ? chosenPluginTools(active, draft) as PluginTool[] : []
   const chosenIds = new Set(chosen.map(tool => tool.id))
@@ -157,28 +159,31 @@ export function PluginPicker({ open, catalog, selection, readOnly = false, loadi
   }
   const group = (origin: PluginCapability['origin'], key: string) => {
     const rows = shown.filter(plugin => plugin.origin === origin)
-    if (!rows.length || origin === 'official' && !(officialExpanded || normalizedQuery || filter === 'selected' || filter === 'official')) return null
+    if (!rows.length || origin === 'official' && showBundle) return null
     return <div className={css.group}><div className={css.groupHeading}><span>{t(key)}</span><span>{rows.length}</span></div>{rows.map(pluginRow)}</div>
   }
 
   return <Modal open={open} headless title={t('pluginPickerTitle')} className={css.dialog} onClose={onClose}>
     <div className={css.shell} data-plugin-picker>
-      <header className={css.header}><div><h2>{t('pluginPickerTitle')}</h2><p>{t('pluginPickerHint')}</p></div><Button size="sm" shape="rounded" className={css.closeButton} icon={<IconCloseOutline16 />} aria-label={t('pluginPickerClose')} onClick={onClose} /></header>
+      <header className={css.header}><div><h2>{t('pluginPickerTitle')}</h2></div><Button size="sm" shape="rounded" className={css.closeButton} icon={<IconCloseOutline16 />} aria-label={t('pluginPickerClose')} onClick={onClose} /></header>
       <div className={css.toolbar}>
-        <nav className={css.filters} aria-label={t('pluginPickerFilterLabel')}>{(['all', 'custom', 'official', 'selected'] as const).map(source => <button key={source} type="button" ref={element => { if (element) filterRefs.current.set(source, element); else filterRefs.current.delete(source) }} aria-pressed={filter === source} className={css.filter} onClick={() => { setFilter(source); if (source === 'official') setOfficialExpanded(true); setMobileDetail(false) }}>{t(({ all: 'pluginPickerAll', custom: 'pluginPickerCustom', official: 'pluginPickerOfficial', selected: 'pluginPickerSelected' } as const)[source])}</button>)}</nav>
+        <nav className={css.filters} aria-label={t('pluginPickerFilterLabel')}>{(['all', 'custom', 'official', 'selected'] as const).map(source => <button key={source} type="button" ref={element => { if (element) filterRefs.current.set(source, element); else filterRefs.current.delete(source) }} aria-pressed={filter === source} className={css.filter} onClick={() => { setFilter(source); if (source === 'official' || source === 'selected') setOfficialExpanded(true); setMobileDetail(false) }}>{t(({ all: 'pluginPickerAll', custom: 'pluginPickerCustom', official: 'pluginPickerOfficial', selected: 'pluginPickerSelected' } as const)[source])}</button>)}</nav>
         <Input data-modal-autofocus className={css.search} icon={<IconSearchOutline16 />} aria-label={t('pluginPickerSearch')} placeholder={t('pluginPickerSearch')} value={query} onChange={event => { setQuery(event.currentTarget.value); setMobileDetail(false) }} />
       </div>
       {error && <div className={css.error} role="alert"><span>{t('pluginPickerError')}</span><details><summary>{t('pluginPickerErrorDetails')}</summary><pre>{error}</pre></details></div>}
       <div className={css.body} data-detail={mobileDetail || undefined}>
         <section ref={catalogRef} className={css.catalog} aria-label={t('pluginPickerCatalog')}>
-          {showBundle && <><div className={css.bundle}>
+          {showBundle && <div className={css.bundleGroup}><div className={css.bundle}>
             <input type="checkbox" className={css.checkbox} aria-label={t('pluginPickerOfficialEnable')} checked={bundleState === 'all'} ref={element => { if (element) element.indeterminate = bundleState === 'partial' }} disabled={readOnly || !official.some(plugin => plugin.available)} title={!official.some(plugin => plugin.available) ? t('pluginCapabilityNotInCatalog') : undefined} onChange={event => { changeBundle(event.currentTarget.checked) }} />
             <div className={css.bundleContent}><strong>{t('pluginPickerOfficialBundle')}</strong><small>{t('pluginPickerBundleCount', { plugins: official.length, tools: official.reduce((count, plugin) => count + plugin.tools.length, 0) })}{bundleState === 'partial' && ` · ${t('pluginPickerBundlePartial')}`}</small>
-              <button className={css.bundleExpand} type="button" aria-expanded={officialExpanded} onClick={() => { setOfficialExpanded(value => !value) }}>{t(officialExpanded ? 'pluginPickerCollapseOfficial' : 'pluginPickerExpandOfficial', { count: official.length })}{officialExpanded ? <IconChevronUpOutline14 /> : <IconChevronDownOutline14 />}</button>
+              {officialToggle(css.bundleExpand)}
             </div><IconCordisPluginOutline14 size={18} />
-          </div>{confirmation('bundle')}</>}
+          </div>{confirmation('bundle')}
+            {/* Official plugins open directly under the row that owns them, before custom plugins. */}
+            {officialExpanded && officialRows.length > 0 && <div className={css.bundleList}>{officialRows.map(pluginRow)}{officialRows.length > 3 && officialToggle(css.bundleCollapse)}</div>}
+          </div>}
           {loading && <p className={css.empty} role="status"><IconLoadingOutline16 />{t('pluginPickerLoading')}</p>}
-          {group('custom', 'pluginPickerCustomGroup')}{group('official', 'pluginPickerOfficialGroup')}{group('unassigned', 'pluginPickerUnassignedGroup')}
+          {group('official', 'pluginPickerOfficialGroup')}{group('custom', 'pluginPickerCustomGroup')}{group('unassigned', 'pluginPickerUnassignedGroup')}
           {!shown.length && !loading && <p className={css.empty}>{t(normalizedQuery ? 'pluginPickerNoMatches' : filter === 'selected' ? 'pluginPickerNoSelected' : 'pluginPickerNoPlugins')}</p>}
         </section>
         <section ref={detailRef} className={css.detail} aria-label={t('pluginPickerDetail')}>
@@ -197,7 +202,7 @@ export function PluginPicker({ open, catalog, selection, readOnly = false, loadi
               {pending?.pluginId === active.id && confirmation('plugin')}
             </> : <p className={css.scopeHint}>{t('pluginPickerUnassignedHint')}</p>}
             {!!active.requiredPlugins?.length && <p className={css.related}>{t('pluginPickerDependencies', { plugins: active.requiredPlugins.map(id => { const plugin = catalog.find(item => item.id === id); return plugin ? nameOf(plugin) : id }).join('、') })}</p>}
-            {!!active.relatedSkills?.length && <p className={css.related}>{t('pluginPickerRelatedSkills', { skills: active.relatedSkills.join('、') })}<br />{t('pluginPickerSkillsIndependent')}{selectedSkills.some(skill => active.relatedSkills?.includes(skill)) && <IconCheckOutline16 size={12} />}</p>}
+            {!!active.relatedSkills?.length && <p className={css.related}>{t('pluginPickerRelatedSkills', { skills: active.relatedSkills.join('、') })}{selectedSkills.some(skill => active.relatedSkills?.includes(skill)) && <IconCheckOutline16 size={12} />}</p>}
             {currentChoice?.enabled && currentChoice.mode === 'custom' && chosen.length === 0 && active.origin !== 'unassigned' && <p className={css.scopeHint} role="status">{t('pluginPickerEmptyCustom')}</p>}
             <div className={css.toolHeading}><span>{t('pluginPickerToolHeading')}</span><span>{chosen.length} / {detailTools.length}</span></div>
             <div>{detailTools.map(tool => {
@@ -205,10 +210,10 @@ export function PluginPicker({ open, catalog, selection, readOnly = false, loadi
               const condition = reasonOf(tool)
               return <div className={css.toolRow} key={tool.id}>
                 {editable ? <input type="checkbox" className={css.checkbox} aria-label={t('pluginPickerChooseTool', { name: tool.name })} checked={chosenIds.has(tool.id)} disabled={readOnly || active.migrationOnly || active.origin !== 'unassigned' && !currentChoice?.enabled || !tool.available && !chosenIds.has(tool.id)} title={!tool.available ? condition || t('pluginPickerNotInCatalog') : undefined} onChange={event => { const checked = event.currentTarget.checked; setPending(null); setDraft(value => togglePluginTool(value, active, tool.id, checked)) }} /> : <span className={clsx(css.toolMark, !chosenIds.has(tool.id) && css.disabledMark)} aria-hidden="true">{chosenIds.has(tool.id) && <IconCheckOutline16 size={14} />}</span>}
-                <div className={css.toolText}><strong>{labelOf(tool) !== tool.name ? <>{labelOf(tool)}<code>{tool.name}</code></> : <code>{tool.name}</code>}</strong><small>{tool.description}</small>{condition && <small className={css.conditionText}>{condition}</small>}{tool.requiresContext && <small>{t('pluginPickerContext', { context: tool.requiresContext })}</small>}</div>
+                <div className={css.toolText}><strong>{labelOf(tool) !== tool.name ? <>{labelOf(tool)}<code>{tool.name}</code></> : <code>{tool.name}</code>}</strong><small className={css.toolDescription} title={tool.description}>{tool.description}</small>{condition && <small className={css.conditionText}>{condition}</small>}{tool.requiresContext && <small>{t('pluginPickerContext', { context: tool.requiresContext })}</small>}</div>
               </div>
             })}</div>
-            <details className={css.technical}><summary>{t('pluginPickerInfo')}</summary>{active.packageName && <code>{active.packageName}</code>}{active.version && <p>{t('pluginPickerVersion', { version: active.version })}</p>}<p>{t(active.discovery === 'unassigned' ? 'pluginPickerUnassignedRegistration' : 'pluginPickerKnownRegistration')}</p></details>
+            {(active.packageName || active.version) && <details className={css.technical}><summary>{t('pluginPickerInfo')}</summary>{active.packageName && <code>{active.packageName}</code>}{active.version && <p>{t('pluginPickerVersion', { version: active.version })}</p>}</details>}
           </> : <p className={css.empty}>{t('pluginPickerNoDetail')}</p>}
         </section>
       </div>

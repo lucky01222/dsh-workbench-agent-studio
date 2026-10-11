@@ -1,7 +1,7 @@
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { PromptController } from './prompt-controller.ts'
 import { ConnectorController } from './connector-controller.ts'
-import { buildPluginCatalog, clonePluginSelection, selectionFromTools, flattenPluginSelection, isUnifiedLibraryCatalog, hasLegacyLibraryBindings } from './plugin-capabilities.mjs'
+import { buildPluginCatalog, clonePluginSelection, selectionFromTools, flattenPluginSelection, togglePluginTool, isUnifiedLibraryCatalog, hasLegacyLibraryBindings } from './plugin-capabilities.mjs'
 import { PluginChoiceStore, samePluginSelection, samePluginBaseline } from './plugin-choice-store.mjs'
 const clone=v=>structuredClone(v), uid=()=>crypto.randomUUID(), blank=()=>[{id:uid(),role:'user',text:''}]
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value
@@ -82,7 +82,12 @@ export class StudioController {
   const s=this.getSnapshot();if(s.document?.readOnly)return;const draft={...s.draft,...patch};
   if(patch.skills?.length)draft.tools=[...new Set([...draft.tools,'skill'])];if(patch.tools&&!draft.tools.includes('skill'))draft.skills=[];
   let selection=s.pluginSelection;
-  if(patch.tools||patch.skills){const catalog=this.pluginCatalog({...s,draft}),next=selectionFromTools(draft.tools,catalog);
+  // A skills-only edit adds at most the skill loader. Re-deriving every binding from flat
+  // tools would split plugins whose names carry a historical owner (unified Library tools).
+  if(patch.skills&&!patch.tools&&selection){const catalog=this.pluginCatalog({...s,draft});let next=clonePluginSelection(selection);
+   if(draft.tools.includes('skill')&&!s.draft.tools.includes('skill')){const owner=catalog.find(plugin=>plugin.tools.some(tool=>tool.id==='skill'));if(owner)next=togglePluginTool(next,owner,'skill',true);if(!flattenPluginSelection(next,catalog).includes('skill'))next=selectionFromTools(draft.tools,catalog,next)}
+   selection=next}
+  else if(patch.tools||patch.skills){const catalog=this.pluginCatalog({...s,draft}),next=selectionFromTools(draft.tools,catalog);
    for(const [id,choice] of Object.entries(selection||{})){if(!choice.enabled||choice.mode!=='all')continue;const plugin=catalog.find(p=>p.id===id);if(!plugin)continue;
     const desired=new Set(flattenPluginSelection({[id]:choice},[plugin]));const actual=plugin.tools.filter(tool=>draft.tools.includes(tool.id)).map(tool=>tool.id);
     if(desired.size===actual.length&&actual.every(name=>desired.has(name)))next[id]=clonePluginSelection({[id]:choice})[id];
@@ -124,7 +129,8 @@ export class StudioController {
  async acceptOwnerMigration(result,submitted,request,kind){
   const r=result?.receipt
   if(!result?.document||result.document.id!==submitted.document.id||result.document.id!==request.id||!Number.isSafeInteger(result.document.revision)||result.document.revision<1||r?.agentId!==request.id||r.id!==request.operationId||r.status!==(kind==='apply'?'applied':'undone')||(kind==='undo'?r.undoOperationId!==request.undoOperationId:r.sourceRevision!==request.revision||r.policy!==request.policy||r.permissionHash!==request.permissionHash||r.catalogHash!==request.catalogHash))throw new Error('迁移回执身份无法核对，请沿用原操作重试。')
-  this.adoptOwnerMigrationDocument(result.document,{...migrationState(),receipt:clone(result.receipt)},submitted)
+  // recent marks a result produced in this session; stored receipts from earlier updates stay quiet.
+  this.adoptOwnerMigrationDocument(result.document,{...migrationState(),receipt:clone(result.receipt),recent:true},submitted)
   await this.refresh();if(this.getSnapshot().document?.id===result.document.id)await this.refreshCatalog()
   return result
  }
@@ -154,6 +160,15 @@ export class StudioController {
    const state=migrationPreviewState(preview,migrationState(),submitted.cwd);state.preview=null;state.error=message||null
    this.adoptOwnerMigrationDocument(raw,state,submitted);return preview
   }catch(error){if(this.alive&&this.selectionGeneration===selection&&this.getSnapshot().document?.id===id)this.publish({ownerMigration:{...migrationState(),needsReceiptRefresh:true,error:[message,error.message].filter(Boolean).join('；')}});throw error}
+ }
+ /** The everyday path: keep the saved tools and apply in one step. A preview that
+  * adds or removes tools, is blocked or finds an unfinished operation stops for the person. */
+ async ownerMigrationUpdate(){
+  const prior=this.getSnapshot().ownerMigration
+  if(prior?.pendingApply||prior?.pendingUndo)throw new Error('上次操作尚未确认，请先重试。')
+  const preview=await this.ownerMigrationPreview('saved'),state=this.getSnapshot().ownerMigration
+  if(preview?.status!=='ready'||state?.preview?.status!=='ready'||state.pendingApply||state.pendingUndo||preview.added?.length||preview.removed?.length)return preview
+  return this.ownerMigrationApply()
  }
  async ownerMigrationApply(){
   if(this.migrationMutation)return this.migrationMutation

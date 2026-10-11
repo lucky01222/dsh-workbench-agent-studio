@@ -167,12 +167,12 @@ test('catalog runs the actual Agent registration lifecycle and releases resource
     agents: { async create(options) { await options.setup({}); return { agent: scope, dispose: async () => { events.push('release-agent') } } } },
     llm: { stream() { assert.fail('catalog must not invoke a model') } },
     tools: { execute() { assert.fail('catalog must not invoke a tool') }, schemas(key) { assert.equal(key, scope); return [{ name: 'tool', description: 'live' }] } },
-    skills: { async list({ scope: key }) { assert.equal(key, scope); return [{ name: 'visible', description: 'skill', invocation: { modelInvocable: true } }, { name: 'hidden', invocation: { modelInvocable: false } }] } },
+    skills: { async list({ scope: key }) { assert.equal(key, scope); return [{ name: 'visible', description: 'skill', invocation: { modelInvocable: true } }, { name: 'shipped', description: 'plugin skill', source: 'bundled', path: '/profile/node_modules/dsh-example/skills/shipped/SKILL.md', invocation: { modelInvocable: true } }, { name: 'registered', description: 'code skill', source: 'bundled', provider: 'example-skills', resourceBase: { kind: 'directory', path: '/profile/node_modules/dsh-office/node_modules/dsh-univer/skills/registered/' }, invocation: { modelInvocable: true } }, { name: 'hidden', invocation: { modelInvocable: false } }] } },
   })
   service.directory = async cwd => cwd
   const catalog = await service.catalogRows('/fixture', [])
   assert.deepEqual(catalog.tools, [{ name: 'tool', description: 'live', pluginId: null }])
-  assert.deepEqual(catalog.skills, [{ name: 'visible', description: 'skill' }])
+  assert.deepEqual(catalog.skills, [{ name: 'visible', description: 'skill' }, { name: 'shipped', description: 'plugin skill', source: 'bundled', owner: 'dsh-example' }, { name: 'registered', description: 'code skill', source: 'bundled', owner: 'dsh-office' }])
   assert.deepEqual(events, ['register', 'mount', 'release-agent', 'release-preset'])
   events.length = 0
   service.ctx.tools.schemas = () => { throw Error('catalog read failed') }

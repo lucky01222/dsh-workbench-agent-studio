@@ -49,6 +49,33 @@ test('legacy Library catalog refresh keeps all 12 saved tools without mutation; 
  await c.ownerMigrationPreview();assert.equal(c.getSnapshot().ownerMigration.preview.policy,'saved');assert.deepEqual(c.getSnapshot().ownerMigration.preview.added,[]);assert.deepEqual(f.database.get('a'),before);assert.equal(c.getSnapshot().draft.pluginBindings[LIBRARY_OWNER].mode,'all')
  await c.ownerMigrationPreview('current');assert.equal(c.getSnapshot().ownerMigration.preview.added.length,3);assert.equal(c.getSnapshot().draft.tools.length,12);assert.deepEqual(f.database.get('a'),before);c.dispose()
 })
+test('choosing skills keeps unified Library bindings intact and adds only the skill loader',async()=>{
+ const tools=[...UNIFIED_LIBRARY_TOOLS],bindings={[LIBRARY_OWNER]:{enabled:true,mode:'custom',tools}},document={...doc('a'),definition:{...definition,tools,pluginBindings:bindings}}
+ const rows=[...UNIFIED_LIBRARY_TOOLS.map(name=>({name,description:name,pluginId:LIBRARY_OWNER,pluginVersion:'0.29.4'})),{name:'skill',description:'skill',pluginId:'@deepseek-ai/dsh-tool-skill',pluginVersion:'0.1.7-rc.2'}]
+ const api=async method=>{if(method==='bootstrap')return {agents:[document],presets:[],cwd:'/workspace',capabilityBindings:true};if(method==='models')return [];if(method==='history')return {runs:[],evaluations:[]}
+  if(method==='catalog')return {tools:rows,skills:[{name:'library-knowledge',description:'k',source:'bundled',owner:LIBRARY_OWNER}],capabilityBindings:true}
+  if(method==='ownerMigrationPreview')return {version:1,status:'not-needed',id:'a',revision:1,policy:'saved',before:{tools},after:{tools},added:[],removed:[],disabledBindings:{},reasons:[],affectedOwners:[]};throw Error(method)}
+ const c=new StudioController(api);await c.refresh();await c.open('a');const before=structuredClone(c.getSnapshot().pluginSelection)
+ c.change({skills:['library-knowledge']});let s=c.getSnapshot()
+ assert.deepEqual(s.pluginSelection[LIBRARY_OWNER],before[LIBRARY_OWNER]);assert.equal(Object.keys(s.pluginSelection).some(id=>id!==LIBRARY_OWNER&&id!=='@deepseek-ai/dsh-tool-skill'),false)
+ assert.deepEqual(s.draft.pluginBindings['@deepseek-ai/dsh-tool-skill'],{enabled:true,mode:'custom',tools:['skill']});assert.ok(s.draft.tools.includes('skill'))
+ c.change({skills:[]});s=c.getSnapshot();assert.deepEqual(s.pluginSelection[LIBRARY_OWNER],before[LIBRARY_OWNER]);c.dispose()
+})
+test('Update keeps the saved tools and applies in one step, then offers only Undo',async()=>{
+ const f=migrationSetup();await f.open();const c=f.c
+ await c.ownerMigrationUpdate()
+ const s=c.getSnapshot();assert.equal(s.document.revision,2);assert.equal(s.draft.tools.length,12);assert.equal(s.ownerMigration.receipt.status,'applied');assert.equal(s.ownerMigration.recent,true);assert.equal(c.ownerMigrationNeeded(),false)
+ const previews=f.calls.filter(x=>x.method==='ownerMigrationPreview');assert.ok(previews.length>=1);assert.ok(previews.every(x=>x.args.policy==='saved'))
+ const applies=f.calls.filter(x=>x.method==='ownerMigrationApply');assert.equal(applies.length,1);assert.equal(applies[0].args.policy,'saved');assert.equal(f.calls.some(x=>x.method==='save'),false)
+ await c.ownerMigrationUndo();assert.equal(c.getSnapshot().ownerMigration.receipt.status,'undone');assert.equal(c.ownerMigrationNeeded(),true);c.dispose()
+})
+test('Update stops at the preview whenever the tool scope would change',async()=>{
+ const f=migrationSetup();f.c.dispose();const before=structuredClone(f.database.get('a'))
+ const c=new StudioController(async(method,args)=>{const result=await f.api(method,args);return method==='ownerMigrationPreview'?{...result,status:'ready',added:['library_sources'],after:{...result.after,tools:[...result.after.tools,'library_sources']}}:result})
+ await c.refresh();await c.open('a');await c.ownerMigrationUpdate()
+ assert.equal(f.calls.some(x=>x.method==='ownerMigrationApply'),false);assert.deepEqual(f.database.get('a'),before);assert.deepEqual(c.getSnapshot().ownerMigration.preview.added,['library_sources'])
+ await c.ownerMigrationApply();assert.equal(f.calls.filter(x=>x.method==='ownerMigrationApply').length,1);c.dispose()
+})
 test('service-parsed definitions with different flat and binding tool order remain saved and load their durable migration receipt',async()=>{
  const f=migrationSetup();await f.open();await f.c.ownerMigrationPreview('current');await f.c.ownerMigrationApply();f.c.dispose()
  const source=f.database.get('a'),original=Definition.parse({...source.definition,connectorBindings:{second:'two',first:'one'}})
