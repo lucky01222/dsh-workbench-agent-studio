@@ -66,10 +66,13 @@ export class StudioController {
   const sourceDraft=crossWorkspace?{...source.draft,tools:[...server.definition.tools],skills:[...server.definition.skills]}:source.draft;
   const stored=this.choiceStore.read(server,workspace);
   const serverBindings=snapshot.capabilityBindings?server.definition.pluginBindings:undefined;
-  const current=source.pluginSelection&&snapshot.pluginIntentWorkspace===workspace&&(samePluginBaseline(snapshot.pluginBaseline,server)||conflict&&snapshot.pluginSelectionEdited)
+  // A read-only preset has no choices of its own to keep: derive its groups from the current catalog every time,
+  // so a selection cached by an earlier version cannot outlive a correction.
+  const live={live:document.readOnly===true};
+  const current=!live.live&&source.pluginSelection&&snapshot.pluginIntentWorkspace===workspace&&(samePluginBaseline(snapshot.pluginBaseline,server)||conflict&&snapshot.pluginSelectionEdited)
    &&(serverBindings===undefined||snapshot.pluginIntentSource==='server'||snapshot.pluginSelectionEdited)?source.pluginSelection:null;
-  const saved=selectionFromTools(server.definition.tools,catalog,serverBindings!==undefined?serverBindings:stored);
-  const selection=selectionFromTools(sourceDraft.tools,catalog,current||serverBindings||stored);
+  const saved=selectionFromTools(server.definition.tools,catalog,serverBindings!==undefined?serverBindings:stored,live);
+  const selection=selectionFromTools(sourceDraft.tools,catalog,current||serverBindings||stored,live);
   const external=sourceDraft.tools.filter(name=>name.startsWith('openconnector/'));
   const tools=flattenPluginSelection(selection,catalog),draft=document.readOnly?sourceDraft:{...sourceDraft,tools:[...new Set([...tools,...external])]};
   if(!document.readOnly&&!draft.tools.includes('skill')&&draft.skills.length)draft.skills=[];
@@ -224,7 +227,7 @@ export class StudioController {
  async remove(){await this.guard(async()=>{const id=this.getSnapshot().document.id;await this.api('delete',{id});this.choiceStore.remove(this.pluginWorkspace(),id);this.tabs.delete(id);this.publish({document:null,draft:null,pluginSelection:null,pluginSavedSelection:null,pluginBaseline:null,pluginIntentWorkspace:null,openIds:this.getSnapshot().openIds.filter(v=>v!==id)});await this.refresh()})}
  async reload(){const id=this.getSnapshot().document.id;this.tabs.delete(id);this.publish({document:null,pluginSelection:null,pluginSavedSelection:null,pluginBaseline:null,pluginIntentWorkspace:null});await this.refresh();await this.open(id)}
  async refreshCatalog(){const s=this.getSnapshot(),epoch=++this.catalogGeneration,selection=this.selectionGeneration;this.publish({catalogLoading:true,ownerMigration:this.invalidateOwnerMigration()});try{
-  const [result,directory]=await Promise.all([this.api('catalog',{cwd:s.cwd,selected:s.draft?.tools||[]}),this.pluginDirectoryProvider?this.pluginDirectoryProvider().catch(error=>({error:String(error.message||error)})):Promise.resolve(s.pluginDirectory)]);
+  const [result,directory]=await Promise.all([this.api('catalog',{cwd:s.cwd,selected:s.draft?.tools||[],...(s.document?.id?{source:s.document.id}:{})}),this.pluginDirectoryProvider?this.pluginDirectoryProvider().catch(error=>({error:String(error.message||error)})):Promise.resolve(s.pluginDirectory)]);
   if(epoch===this.catalogGeneration&&selection===this.selectionGeneration&&this.getSnapshot().cwd===s.cwd){const current={...this.getSnapshot(),catalog:result,capabilityBindings:result.capabilityBindings===true||(result.capabilityBindings===undefined&&this.getSnapshot().capabilityBindings),...(directory&&!directory.error?{pluginDirectory:directory}:{}),pluginDirectoryError:directory?.error||null};this.publish({...current,...this.reconcilePlugins(current)});const saved=this.getSnapshot(),bindings=saved.document?.definition.pluginBindings;if(saved.status==='saved'&&!saved.document?.readOnly&&isUnifiedLibraryCatalog(result.tools||[])&&(bindings?.['dsh-workbench-library']||bindings?.['dsh-library-knowledge'])&&!saved.ownerMigration?.pendingApply&&!saved.ownerMigration?.pendingUndo)await this.ownerMigrationPreview('saved').catch(()=>{})}
  }finally{if(epoch===this.catalogGeneration)this.publish({catalogLoading:false})}}
  edit=messages=>{const s=this.getSnapshot();this.undo=[...this.undo,clone(s.messages)];this.redo=[];this.publish({messages:clone(messages),output:[],undoable:true,redoable:false})}

@@ -1,6 +1,6 @@
 {
   "name": "dsh-workbench-agent-studio-runtime",
-  "version": "1.10.1",
+  "version": "1.10.4",
   "description": "Portable Agent model, prompt and capability policy",
   "type": "module",
   "license": "MIT",

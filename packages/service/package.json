@@ -1,6 +1,6 @@
 {
   "name": "dsh-workbench-agent-studio-service",
-  "version": "1.11.2",
+  "version": "1.13.2",
   "description": "Agent Studio persistent service and finite trials",
   "type": "module",
   "license": "MIT",
@@ -8,7 +8,8 @@
     ".": "./dist/index.mjs",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
-    "./protocol": "./dist/protocol.mjs"
+    "./protocol": "./dist/protocol.mjs",
+    "./creator-agent": "./dist/creator-agent.mjs"
   },
   "files": [
     "dist",
@@ -18,6 +19,6 @@
   ],
   "peerDependencies": {
     "@deepseek-ai/dsh": "0.1.7-rc.2",
-    "dsh-workbench-agent-studio-runtime": "1.10.1"
+    "dsh-workbench-agent-studio-runtime": "1.10.4"
   }
 }

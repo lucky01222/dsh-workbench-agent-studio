@@ -7,6 +7,8 @@ import { interpolate } from '@deepseek-ai/cordis-plugin-loader'
 // this state on the instance (rather than a WeakMap keyed by `this`) makes all
 // caller views share it. Lazy initialization also survives service publication
 // from the official base constructor before subclass initialization finishes.
+/** Cordis FiberState.ACTIVE: the plugin callback has returned. */
+const ACTIVE = 2
 const ownership = Symbol('studio.tool-ownership')
 const deferredOrigins = Symbol('studio.deferred-tool-origins')
 
@@ -22,7 +24,18 @@ function registryConfig(context, config) {
 }
 
 /** Read Loader identities only; a fiber display name is not an owning module. */
-function ownerOf(context, origins) {
+function ownerOf(context, origins, started, running) {
+  // A plugin declared after a listener began owns its anonymous descendants,
+  // even when its own start was observed before Loader attached its entry and
+  // the descendant was therefore tagged with the listener's origin.
+  const underNewDeclaration = fiber => {
+    const seen = new Set()
+    for (let parent = fiber.parent?.fiber; parent && !seen.has(parent); parent = parent.parent?.fiber) {
+      seen.add(parent)
+      if (started?.has(parent) && parent.entry && parent.entry !== parent.parent?.fiber?.entry) return true
+    }
+    return false
+  }
   const entryChain = [], visited = new Set(), entries = new Set()
   for (let fiber = context.fiber; fiber && !visited.has(fiber); fiber = fiber.parent?.fiber) {
     visited.add(fiber)
@@ -31,7 +44,12 @@ function ownerOf(context, origins) {
     // new Loader declaration wins; otherwise an event-created fiber retains
     // the source plugin whose listener created it on a different Agent ctx.
     const declaredHere = entry && entry !== fiber.parent?.fiber?.entry
-    if (!entryChain.length && !declaredHere && origins?.has(fiber)) return origins.get(fiber)
+    const anonymous = !entryChain.length && !declaredHere && !underNewDeclaration(fiber)
+    // A listener that registers straight onto a live shared context (an Agent's
+    // own ctx) is the registrant, not whoever created that context. A fiber
+    // still loading is running its own callback and keeps its own origin.
+    if (anonymous && running && fiber === context.fiber && fiber.state === ACTIVE) return running
+    if (anonymous && origins?.has(fiber)) return origins.get(fiber)
     if (!entry || entries.has(entry)) continue
     entries.add(entry)
     if (entry.options?.group || typeof entry.options?.name !== 'string' || !entry.options.name) continue
@@ -46,6 +64,7 @@ function observeDeferredOrigins(context, state) {
   context.on('internal/plugin', fiber => {
     const invocation = state.active.getStore()
     if (!fiber.uid || !invocation) return
+    state.started.add(fiber)
     if (fiber.entry && fiber.entry !== fiber.parent?.fiber?.entry) {
       // A listener can invoke Loader, which asynchronously starts another
       // declared plugin under the same async context. That declaration starts
@@ -56,13 +75,16 @@ function observeDeferredOrigins(context, state) {
     const visited = new Set()
     for (let parent = fiber.parent?.fiber; parent && !visited.has(parent); parent = parent.parent?.fiber) {
       visited.add(parent)
-      if (state.boundaries.get(parent) === invocation) return
+      // A declared plugin owns its anonymous descendants whichever invocation
+      // later starts them: an `inject` child often activates after the listener
+      // that loaded its plugin has returned, inside an unrelated outer one.
+      if (state.boundaries.has(parent)) return
     }
     state.fibers.set(fiber, invocation.origin)
   })
   context.on('internal/listener', function(name, listener, options) {
     if (state.intercepting || typeof name !== 'string' || name.startsWith('internal/')) return
-    const origin = ownerOf(this, state.fibers)
+    const origin = ownerOf(this, state.fibers, state.started)
     if (!origin) return
     // Re-enter the public registration API with the original owner/options.
     // The narrow synchronous guard prevents wrapping this replacement again.
@@ -84,14 +106,15 @@ export class StudioToolRuntime extends ToolRuntime {
   constructor(context, config) {
     super(context, registryConfig(context, config))
     this[ownership] ??= new WeakMap()
-    const state = this[deferredOrigins] ??= { active: new AsyncLocalStorage(), fibers: new WeakMap(), boundaries: new WeakMap(), intercepting: false }
+    const state = this[deferredOrigins] ??= { active: new AsyncLocalStorage(), fibers: new WeakMap(), boundaries: new WeakMap(), started: new WeakSet(), intercepting: false }
     observeDeferredOrigins(context, state)
   }
 
   register(definition) {
     const context = this.ctx, scope = scopeOf(context)
     const registry = this[ownership] ??= new WeakMap()
-    const owner = ownerOf(context, this[deferredOrigins]?.fibers)
+    const tracked = this[deferredOrigins]
+    const owner = ownerOf(context, tracked?.fibers, tracked?.started, tracked?.active.getStore()?.origin)
     const record = { owner, scope: scope === undefined ? 'global' : 'scoped' }
     const register = () => super.register(definition)
     return context.effect(function* () {

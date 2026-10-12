@@ -66,6 +66,9 @@ test('built Studio CSS survives another plugin materializing and being replaced'
   assert.match(studioStyle.textContent, /\.AgentStudio_root\s*\{/)
   // Document workbench also ships Workbench.module.css; a shared prefix let its rules restyle Studio fields.
   assert.doesNotMatch(studioStyle.textContent, /\.Workbench_/)
+  // The question-card detail is aligned with its title through the card's data attribute, never a hashed class.
+  assert.match(studioStyle.textContent, /\[data-question-scroll\]\s*>\s*div:first-child:not\(\[role\]\)\s*\{\s*margin:\s*10px 24px/)
+  assert.doesNotMatch(studioStyle.textContent, /Mbwy4a/)
   assert.equal(studioStyle.getAttribute('data-plugin'), owner)
   assert.equal(studioStyle.getAttribute('data-plugin-css'), owner)
   const foreignStyle = document.createElement('style')

@@ -138,3 +138,11 @@ test('scope inventory reads actual registrations and bundle versions without cre
   ctx.get = () => ({ listBundles: async () => { throw Error('manager unavailable') } })
   assert.equal((await toolsForScope(ctx, scope))[0].pluginId, 'custom-tools')
 })
+
+test('a row declared by one of Studio\'s own parts belongs to the Studio bundle', () => {
+  const registration = { moduleName: 'dsh-workbench-agent-studio-service/creator-agent', entryId: 'studio-creator-tools', entryChain: [{ entryId: 'studio-creator-tools', moduleName: 'dsh-workbench-agent-studio-service/creator-agent' }] }
+  assert.deepEqual(ownerOfRegistration(registration, [{ name: 'dsh-workbench-agent-studio', version: '1.13.0', rows: [] }]),
+    { id: 'dsh-workbench-agent-studio', packageName: 'dsh-workbench-agent-studio', origin: 'custom', version: '1.13.0' })
+  assert.equal(ownerOfRegistration({ moduleName: 'dsh-workbench-agent-studio-extras' }).id, 'dsh-workbench-agent-studio-extras')
+})
+

@@ -9,6 +9,7 @@ const unavailable = message => Object.assign(new Error(message), { code: 'CAPABI
 export const packageOf = name => typeof name === 'string' && /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+(?:\/|$)/i.test(name)
   && !name.startsWith('.') && !name.includes(':') ? name.split('/').slice(0, name.startsWith('@') ? 2 : 1).join('/') : null
 
+const STUDIO_BUNDLE = 'dsh-workbench-agent-studio', STUDIO_PARTS = /^dsh-workbench-agent-studio-(?:service|ui|runtime)$/
 /** Ownership comes from the actual registering fiber and the installed bundle's rows. */
 export function ownerOfRegistration(registration, bundles = []) {
   if (!registration) return null
@@ -25,8 +26,10 @@ export function ownerOfRegistration(registration, bundles = []) {
     if (exact.length === 1) return { id: exact[0].name, packageName: exact[0].name, origin: 'custom', ...(exact[0].version ? { version: exact[0].version } : {}) }
   }
   if (!packageName || packageName === 'cordis') return null
-  const direct = bundles.find(bundle => bundle.name === packageName)
-  return { id: packageName, packageName, origin: packageName.startsWith('@deepseek-ai/') ? 'official' : 'custom', ...(direct?.version ? { version: direct.version } : {}) }
+  // Studio's own parts ship inside one bundle; a row they declare inside a preset is still that bundle's.
+  const owner = STUDIO_PARTS.test(packageName) ? STUDIO_BUNDLE : packageName
+  const direct = bundles.find(bundle => bundle.name === owner)
+  return { id: owner, packageName: owner, origin: 'custom', ...(direct?.version ? { version: direct.version } : {}) }
 }
 
 async function installedVersion(packageName) {

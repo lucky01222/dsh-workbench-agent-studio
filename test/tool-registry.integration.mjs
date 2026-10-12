@@ -209,6 +209,47 @@ test('event-created Agent fibers retain the source plugin across asynchronous an
   assert.equal(ctx.tools.registrationOf('deferred', key), undefined)
 })
 
+test('a declared plugin keeps its late inject descendants when an unrelated outer listener is the one running', async t => {
+  const ctx = await harness(t)
+  await ctx.plugin(StudioToolRuntime)
+  const key = {}
+  let agentScope, late
+  await mount(ctx, 'agent-host', host => { agentScope = createScope(host, key) })
+  // The inner listener loads a module whose tool waits for a service, as the official file plugin's read_image waits for attachments.
+  await mount(ctx, 'preset-loader', source => {
+    source.on('agent/created', async ({ agent }) => {
+      await mount(ctx, 'image-module', own => { late = own.inject(['tools', 'attachments'], nested => { nested.tools.register(tool('read_image')) }) }, agent.ctx)
+    })
+  })
+  // The outer listener (a request handler) starts the Agent and is still running when the service appears.
+  await mount(ctx, 'request-handler', source => {
+    source.on('studio/request', async () => {
+      await ctx.serial('agent/created', { agent: { ctx: agentScope.ctx } })
+      ctx.provide('attachments', {})
+      await late.await()
+    })
+  })
+  await ctx.serial('studio/request')
+  assert.equal(ctx.tools.registrationOf('read_image', key).moduleName, 'cordis:image-module', 'not the handler that happened to be running')
+})
+
+test('a plugin that shadows a tool directly on a live Agent ctx owns it, not the handler that created the Agent', async t => {
+  const ctx = await harness(t)
+  await ctx.plugin(StudioToolRuntime)
+  const key = {}
+  let agentScope
+  // As dsh-codex does for read_image: no fiber of its own, a plain register on agent.ctx from its listener.
+  await mount(ctx, 'enhancer', source => { source.on('agent/created', ({ agent }) => { agent.ctx.tools.register(tool('read_image')) }) })
+  await mount(ctx, 'request-handler', source => {
+    source.on('studio/request', async () => {
+      agentScope = await scoped(ctx, key)
+      await ctx.serial('agent/created', { agent: { ctx: agentScope.ctx } })
+    })
+  })
+  await ctx.serial('studio/request')
+  assert.equal(ctx.tools.registrationOf('read_image', key).moduleName, 'cordis:enhancer')
+})
+
 test('adapter inherits the disabled original registry config while its explicit config wins', async t => {
   const ctx = await harness(t)
   ctx.loader.builtins.tracked = StudioToolRuntime
