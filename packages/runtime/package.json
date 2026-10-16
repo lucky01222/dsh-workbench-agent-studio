@@ -1,6 +1,6 @@
 {
   "name": "dsh-workbench-agent-studio-runtime",
-  "version": "1.10.4",
+  "version": "1.10.5",
   "description": "Portable Agent model, prompt and capability policy",
   "type": "module",
   "license": "MIT",
@@ -18,9 +18,33 @@
     "dist",
     "locale",
     "README.md",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE"
   ],
   "peerDependencies": {
-    "@deepseek-ai/dsh": "0.1.7-rc.2"
+    "@deepseek-ai/dsh": "0.1.7-rc.2 || 0.2.0-rc.2"
+  },
+  "engines": {
+    "dsh": "0.1.7-rc.2 || 0.2.0-rc.2",
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lucky01222/dsh-workbench-agent-studio.git",
+    "directory": "packages/runtime"
+  },
+  "homepage": "https://github.com/lucky01222/dsh-workbench-agent-studio#readme",
+  "bugs": {
+    "url": "https://github.com/lucky01222/dsh-workbench-agent-studio/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "agent",
+    "preset",
+    "workflow"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -1,3 +1,5 @@
+import { getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot'
+import manifest from '../package.json' with { type: 'json' }
 import { randomUUID } from 'node:crypto'
 import { realpath, stat, mkdir } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
@@ -208,7 +210,7 @@ export class StudioService {
       case 'ownerMigrationPreview': return this.ownerMigrations.preview(args)
       case 'ownerMigrationApply': return this.ownerMigrations.apply(args)
       case 'ownerMigrationUndo': return this.ownerMigrations.undo(args)
-      case 'bootstrap': return { presets: (await this.ctx.agentPresets.list()).filter(p=>!p.id.startsWith('wb-studio-')), defaultModel:this.ctx.get('agentDefaultModel')?.currentSelection(), cwd: this.cwd, agents: [...this.domain.table('agents').entries()].map(([, value]) => value).filter(d => !d.deleted), capabilityBindings: true, version: '1.13.2', harness: '0.1.7-rc.2' }
+      case 'bootstrap': return { presets: (await this.ctx.agentPresets.list()).filter(p=>!p.id.startsWith('wb-studio-')), defaultModel:this.ctx.get('agentDefaultModel')?.currentSelection(), cwd: this.cwd, agents: [...this.domain.table('agents').entries()].map(([, value]) => value).filter(d => !d.deleted), capabilityBindings: true, version: manifest.version, harness: getDshRuntimeVersion() }
       case 'readPreset': return this.readPreset(z.string().parse(args.id), args.cwd || this.cwd)
       case 'copyPreset': return this.lock(async()=>{const preset=await this.readPreset(args.id,args.cwd||this.cwd), t=now(); const doc=Document.parse({id:randomUUID(),revision:1,createdAt:t,updatedAt:t,definition:{...preset.definition,name:args.name||preset.definition.name+' 副本'},baseYaml:preset.baseYaml,runtime:preset.runtime,sourcePreset:args.id});await this.domain.table('agents').put(doc.id,doc);await this.domain.table('revisions').put(`${doc.id}:1`,doc);await this.register(doc);return doc})
       case 'receipts': return [...this.domain.table('receipts').entries()].map(([,v])=>v).filter(v=>v.runId===args.id)

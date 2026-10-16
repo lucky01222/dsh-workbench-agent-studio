@@ -241,3 +241,14 @@ test('createHandle passes a fixed resolution into runtime policy and releases bo
   await handle.dispose()
   assert.deepEqual(releases, ['agent', 'preset'])
 })
+
+test('bootstrap identifies the actual host and packaged Studio instead of a historical version', async () => {
+  const { getDshRuntimeVersion } = await import('@deepseek-ai/dsh-app-boot')
+  const { version } = (await import('../packages/service/package.json', { with: { type: 'json' } })).default
+  const { service } = serviceHarness()
+  service.ctx.agentPresets.list = async () => []
+  service.ctx.get = () => undefined
+  const state = await service.dispatch('bootstrap')
+  assert.equal(state.harness, getDshRuntimeVersion())
+  assert.equal(state.version, version)
+})
