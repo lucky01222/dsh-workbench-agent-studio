@@ -21,7 +21,7 @@ dsh web
 
 也可从 [GitHub Releases](https://github.com/lucky01222/dsh-workbench-agent-studio/releases/latest) 下载预构建 `.tgz`，将文件路径传给 `dsh plugin --profile web add`。GitHub 源码不含 `dist/`，不能把源码下载当作现成安装包。
 
-本版为 **工作室 1.13.3 / runtime 1.10.5**，只声明上述两个精确宿主版本。**不支持 0.2.1-alpha.5**：该版移除了工具 `both` 模式，PTC 行为也有变化。桌面应用自带的 Harness 需单独核对版本，本次未验证桌面端。
+本版为 **工作室 1.13.3 / runtime 1.10.5**，只声明上述两个精确宿主版本。**不支持 0.2.1-alpha.5**：该版移除了工具 `both` 模式，PTC 行为也有变化。已补充验证官方 macOS Apple Silicon 桌面版 0.2.0-rc.2，其他桌面版本仍未验证。桌面安装须使用自带 CLI 和 `--profile desktop`，详见[兼容验证记录](docs/compatibility.md)。
 
 ## 一条完整的工作流程
 

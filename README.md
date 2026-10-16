@@ -21,7 +21,7 @@ Use the same `DSH_HOME` for installation and startup. The application archive in
 
 You can also download the prebuilt `.tgz` from [GitHub Releases](https://github.com/lucky01222/dsh-workbench-agent-studio/releases/latest) and pass its path to `dsh plugin --profile web add`. Installing a GitHub source checkout is not equivalent: compiled `dist/` files are intentionally not committed.
 
-**Version scope:** Studio **1.13.3**, portable runtime **1.10.5**. Only the two exact DSH versions above are declared compatible. `0.2.1-alpha.5` removes the `both` tool mode and changes PTC behavior; it is not supported by this release. Desktop applications with a bundled Harness need their own version check and were not tested here.
+**Version scope:** Studio **1.13.3**, portable runtime **1.10.5**. Only the two exact DSH versions above are declared compatible. `0.2.1-alpha.5` removes the `both` tool mode and changes PTC behavior; it is not supported by this release. Official macOS Apple Silicon Desktop 0.2.0-rc.2 has also passed the [additional desktop checks](docs/compatibility.md); other desktop builds remain unverified. Desktop installation uses its bundled CLI and `--profile desktop`, not the Web profile.
 
 ## Configure, try, revise
 
