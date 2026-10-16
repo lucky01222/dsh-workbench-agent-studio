@@ -32,9 +32,11 @@ export const KNOWN_PLUGIN_CONTRACTS = Object.freeze([
   official('dsh-tool-subagent', 'Subagent', '子 Agent', '派发任务或分叉子 Agent。', ['subagent', 'subagent_fork'], 'delegation'),
   official('dsh-tool-workflow', 'Workflow', '工作流', '编排多个 Agent 的执行流程。', ['workflow'], 'delegation'),
   official('dsh-tool-ralph', 'Ralph', 'Ralph 循环', '运行迭代工作流程。', ['ralph'], 'delegation'),
+  official('dsh-tool-present', 'Present', '文件交付', '把生成的文件声明为交付物，供用户直接打开。', ['present']),
   custom('dsh-workbench-library', 'Library', '资料库', '定位、读取、纠正和撤销资料库知识。', ['library_locate', 'library_entities', 'library_relations', 'library_get', 'library_correct', 'library_operation', 'library_undo'], { relatedSkills: ['library-knowledge'] }),
   custom('dsh-library-knowledge', 'Knowledge', '资料库知识工具', '检索知识并回读正文、证据与关系。', ['library_list', 'library_search', 'library_read', 'library_evidence', 'library_graph'], { relatedSkills: ['library-knowledge'], requiredPlugins: ['dsh-workbench-library'] }),
   custom('dsh-workbench-office', 'Office', '文档工作台', '创建、编辑、检查和导出文档。', ['univer_new', 'univer_status', 'univer_worktree', 'univer_unit', 'univer_import', 'univer_inspect', 'univer_execute', 'univer_export', 'univer_lint', 'univer_print_pdf', 'univer_compile_svg', 'univer_api', 'univer_resources', 'univer_screenshot'], { relatedSkills: ['univer', 'univer-base', 'univer-board', 'univer-cross-unit-formula', 'univer-doc', 'univer-embed', 'univer-sheet', 'univer-slide'] }),
+  custom('dsh-workbench-agent-studio', 'AgentStudio', 'Agent 工作室', '读取工作室目录，检查、试跑和保存 Agent 草稿。', ['agent_studio_catalog', 'agent_studio_check', 'agent_studio_write_prompt', 'agent_studio_confirm', 'agent_studio_trial', 'agent_studio_save']),
   custom('dsh-workbench-media-studio', 'Media', '创作画布', '读取画布项目并提出修改建议。', ['media_read_project', 'media_propose_changes'], { requiresContext: '创作助手预设与画布项目绑定' }),
 ])
 
@@ -148,7 +150,7 @@ export function clonePluginSelection(selection = {}) {
  * Legacy tools always become exact custom choices, even if they happen to select
  * every current tool. Only previously saved client intent can restore all mode.
  */
-export function selectionFromTools(tools = [], catalog = [], persisted) {
+export function selectionFromTools(tools = [], catalog = [], persisted, { live = false } = {}) {
   const selection = persisted ? clonePluginSelection(persisted) : {}
   const owned = new Map(catalog.flatMap(plugin => plugin.tools.map(tool => [tool.id, plugin.id])))
   const assigned = new Set(Object.values(selection).filter(choice => choice.enabled).flatMap(choice => choice.tools))
@@ -160,9 +162,11 @@ export function selectionFromTools(tools = [], catalog = [], persisted) {
     let id = owned.get(key) || UNASSIGNED
     const owner = catalog.find(plugin => plugin.id === id)
     // A legacy name is not evidence that its historical provider changed. Keep
-    // exact tools without intent unassigned when the old contract cannot agree
-    // with the new authoritative owner.
-    if (!persisted && owner?.discovery === 'host-registry' && nameOwner.get(key) !== id) id = UNASSIGNED
+    // exact tools without intent unassigned when the old contract names a
+    // different owner than the Host does. A tool no contract mentions has no
+    // history to contradict, and a `live` list (a built-in preset read from its
+    // running composition) has no history at all: the Host's owner stands.
+    if (!persisted && !live && owner?.discovery === 'host-registry' && nameOwner.has(key) && nameOwner.get(key) !== id) id = UNASSIGNED
     const current = selection[id] || emptyChoice()
     selection[id] = { ...current, enabled: true, tools: [...current.tools, key] }
     assigned.add(key)

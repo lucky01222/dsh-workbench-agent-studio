@@ -79,6 +79,7 @@ export const pluginCapabilitiesZh = {
   pluginCapabilityLibrary: '资料库', pluginCapabilityLibraryDescription: '定位知识对象、核对依据和受控纠错',
   pluginCapabilityKnowledge: '资料库知识工具', pluginCapabilityKnowledgeDescription: '检索资料、回读正文与原文依据',
   pluginCapabilityOffice: '文档工作台', pluginCapabilityOfficeDescription: '在草稿中读写文档、表格和幻灯片',
+  pluginCapabilityAgentStudio: 'Agent 工作室', pluginCapabilityAgentStudioDescription: '读取工作室目录，检查、试跑和保存 Agent 草稿',
   pluginCapabilityMedia: '创作画布', pluginCapabilityMediaDescription: '读取当前画布项目，提出剧本与分镜修改',
   pluginCapabilityFs: '文件读写', pluginCapabilityFsDescription: '读取与编辑本地文件、查看图片',
   pluginCapabilityFsSearch: '文件搜索', pluginCapabilityFsSearchDescription: '按文件路径或正文内容查找',
@@ -96,6 +97,7 @@ export const pluginCapabilitiesZh = {
   pluginCapabilitySubagent: '子 Agent', pluginCapabilitySubagentDescription: '创建独立任务或继承当前对话',
   pluginCapabilityWorkflow: '工作流', pluginCapabilityWorkflowDescription: '执行编排好的多步任务',
   pluginCapabilityRalph: '持续执行', pluginCapabilityRalphDescription: '按条件反复执行任务',
+  pluginCapabilityPresent: '文件交付', pluginCapabilityPresentDescription: '把生成的文件交给你直接打开',
   pluginCapabilityUnassigned: '未识别归属的工具', pluginCapabilityUnassignedDescription: '保留已有工具的精确范围，等待可靠的插件归属信息',
   pluginTool_read: '读取文件', pluginTool_write: '写入文件', pluginTool_edit: '替换内容', pluginTool_read_image: '查看图片',
   pluginTool_glob: '查找文件', pluginTool_grep: '搜索正文', pluginTool_str_replace_editor: '编辑文本', pluginTool_bash: '执行命令',
@@ -111,6 +113,7 @@ export const pluginCapabilitiesZh = {
   pluginTool_univer_new: '新建文档', pluginTool_univer_status: '查看文档状态', pluginTool_univer_worktree: '管理草稿', pluginTool_univer_unit: '管理文档单元',
   pluginTool_univer_import: '导入文件', pluginTool_univer_inspect: '读取文档内容', pluginTool_univer_execute: '编辑草稿内容', pluginTool_univer_export: '导出文档',
   pluginTool_univer_lint: '检查幻灯片布局', pluginTool_univer_print_pdf: '输出 PDF', pluginTool_univer_compile_svg: '编译 SVG', pluginTool_univer_api: '查询 API', pluginTool_univer_resources: '查询资源', pluginTool_univer_screenshot: '渲染截图',
+  pluginTool_agent_studio_catalog: '读取工作室目录', pluginTool_agent_studio_check: '检查 Agent 草稿', pluginTool_agent_studio_write_prompt: '撰写提示词', pluginTool_agent_studio_confirm: '请用户确认', pluginTool_agent_studio_trial: '试跑 Agent 草稿', pluginTool_agent_studio_save: '保存为我的 Agent',
   pluginTool_media_read_project: '读取画布项目', pluginTool_media_propose_changes: '提出修改提案',
 }
 
@@ -157,6 +160,7 @@ export const pluginCapabilitiesEn: Record<keyof typeof pluginCapabilitiesZh, str
   pluginCapabilityLibrary: 'Library', pluginCapabilityLibraryDescription: 'Locate knowledge objects, check evidence and correct knowledge',
   pluginCapabilityKnowledge: 'Library knowledge tools', pluginCapabilityKnowledgeDescription: 'Search materials and read their content and original evidence',
   pluginCapabilityOffice: 'Document workbench', pluginCapabilityOfficeDescription: 'Read and edit documents, sheets and slides in drafts',
+  pluginCapabilityAgentStudio: 'Agent Studio', pluginCapabilityAgentStudioDescription: 'Read the Studio catalog; check, trial and save Agent drafts',
   pluginCapabilityMedia: 'Media canvas', pluginCapabilityMediaDescription: 'Read the bound canvas project and propose script or storyboard changes',
   pluginCapabilityFs: 'File operations', pluginCapabilityFsDescription: 'Read and edit local files and view images',
   pluginCapabilityFsSearch: 'File search', pluginCapabilityFsSearchDescription: 'Find files by path or content',
@@ -174,6 +178,7 @@ export const pluginCapabilitiesEn: Record<keyof typeof pluginCapabilitiesZh, str
   pluginCapabilitySubagent: 'Subagents', pluginCapabilitySubagentDescription: 'Create a separate task or inherit this conversation',
   pluginCapabilityWorkflow: 'Workflow', pluginCapabilityWorkflowDescription: 'Execute an orchestrated multistep task',
   pluginCapabilityRalph: 'Repeated execution', pluginCapabilityRalphDescription: 'Repeat a task according to its conditions',
+  pluginCapabilityPresent: 'File delivery', pluginCapabilityPresentDescription: 'Hand finished files to you to open',
   pluginCapabilityUnassigned: 'Tools without a verified owner', pluginCapabilityUnassignedDescription: 'Preserve exact tool selections until reliable plugin ownership is available',
   pluginTool_read: 'Read file', pluginTool_write: 'Write file', pluginTool_edit: 'Replace content', pluginTool_read_image: 'View image',
   pluginTool_glob: 'Find files', pluginTool_grep: 'Search content', pluginTool_str_replace_editor: 'Edit text', pluginTool_bash: 'Run command',
@@ -189,5 +194,6 @@ export const pluginCapabilitiesEn: Record<keyof typeof pluginCapabilitiesZh, str
   pluginTool_univer_new: 'Create document', pluginTool_univer_status: 'Inspect document status', pluginTool_univer_worktree: 'Manage draft', pluginTool_univer_unit: 'Manage document unit',
   pluginTool_univer_import: 'Import file', pluginTool_univer_inspect: 'Read document content', pluginTool_univer_execute: 'Edit draft', pluginTool_univer_export: 'Export document',
   pluginTool_univer_lint: 'Check slide layout', pluginTool_univer_print_pdf: 'Print PDF', pluginTool_univer_compile_svg: 'Compile SVG', pluginTool_univer_api: 'Look up API', pluginTool_univer_resources: 'Find resources', pluginTool_univer_screenshot: 'Render screenshot',
+  pluginTool_agent_studio_catalog: 'Read Studio catalog', pluginTool_agent_studio_check: 'Check Agent draft', pluginTool_agent_studio_write_prompt: 'Write prompt', pluginTool_agent_studio_confirm: 'Ask for confirmation', pluginTool_agent_studio_trial: 'Trial Agent draft', pluginTool_agent_studio_save: 'Save as my Agent',
   pluginTool_media_read_project: 'Read canvas project', pluginTool_media_propose_changes: 'Propose changes',
 }

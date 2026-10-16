@@ -21,3 +21,17 @@ body {
 
 
 }
+
+/*
+ * Question cards (ask_user_question and the creator's confirmation cards): the
+ * Harness rc.2 card insets its title 24px but its Markdown detail only 2px, so
+ * a bulleted detail hangs left of the title and touches it. Align the detail
+ * with the title. The selector uses the card's own data attribute; the options
+ * group that follows carries a role and is left alone.
+ */
+[data-question-scroll] > div:first-child:not([role]) {
+  margin: 10px 24px;
+}
+[data-question-scroll] > div:first-child:not([role]) li + li {
+  margin-top: 2px;
+}

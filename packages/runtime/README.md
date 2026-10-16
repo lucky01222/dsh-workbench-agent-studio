@@ -1,6 +1,6 @@
 # Agent 运行策略
 
-适配官方 Harness 0.1.7-rc.2 的独立运行支持，无需工作室 Service 或 UI。
+适配官方 Harness 0.1.7-rc.2 / 0.2.0-rc.2 的独立运行支持，无需工作室 Service 或 UI。
 
 - `/tool-registry`：继承官方 ToolRuntime，补充真实插件注册来源；在 Host 上替代原工具提供者并继承其配置。
 - `/snapshots`：Host 级单例，使用官方 storageDomain 持久保存每个会话的能力与角色快照。
@@ -10,3 +10,14 @@
 优先使用工作室导出的组合 YAML。旧 `tools[]` 配置保持精确选择；`pluginBindings` 只有明确的 all 模式才在新会话扩大到当前插件工具。已开始会话、续接与历史重试不自动扩张。插件移除或已选工具归属变化会报告不可用。
 
 新导出包含禁用官方 tools 行、挂载来源注册器与快照服务的 Host 配置；不要把快照服务重复放进每个 Preset。配置中的模型与实际工具插件仍由接收宿主提供。
+
+## Public installation / 公开安装
+
+Runtime 1.10.5 supports DSH Web **0.1.7-rc.2 or 0.2.0-rc.2** (Node.js 24+). Alpha builds are not supported. Install this package and the actual tools/models used by the export, then start the target profile with the exported patch:
+
+```sh
+dsh plugin --profile web add https://github.com/lucky01222/dsh-workbench-agent-studio/releases/download/v1.13.3/dsh-workbench-agent-studio-runtime-1.10.5.tgz
+dsh web --patch /path/to/exported-agent.yml
+```
+
+Studio Service/UI are not required. This patch replaces the host tool provider; other replacements can conflict. Capability snapshots remain in the host storage backend after uninstall. Remove dependent preset patches before removing this runtime. See the [application documentation](https://github.com/lucky01222/dsh-workbench-agent-studio#what-this-plugin-changes) for the complete behavior and [MIT license](LICENSE).

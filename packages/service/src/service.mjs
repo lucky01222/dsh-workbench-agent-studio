@@ -1,3 +1,5 @@
+import { getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot'
+import manifest from '../package.json' with { type: 'json' }
 import { randomUUID } from 'node:crypto'
 import { realpath, stat, mkdir } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
@@ -16,6 +18,9 @@ import providers from './capabilities.json' with { type: 'json' }
 import { LibraryOwnerMigrations, ownerMigrationSpec } from './library-owner-migrations.mjs'
 import { chatModelGroups } from './chat-models.mjs'
 import { skillOwner } from './skill-owner.mjs'
+import { CREATOR_ROW } from './creator/tools.mjs'
+import { CREATOR_PRESET_ID, creatorDefinition, creatorCatalog, creatorCheck, draftPrompt, saveDraft, trialDraft } from './creator/operations.mjs'
+import { isReadOnlyTool, unexecutedResult } from './creator/safety.mjs'
 const spec = defineDomain({ name: 'workbench_agent_studio', version: 1, tables: {
   agents: domainTable(Document), revisions: domainTable(Document), runs: domainTable(Run),
   evaluations: domainTable(Evaluation), receipts: domainTable(Receipt), prompts: domainTable(Prompt),
@@ -45,6 +50,15 @@ export class StudioService {
       if (active(value)) await this.domain.table(table).put(id, { ...value, status: 'interrupted' })
     }
     for (const [, doc] of this.domain.table('agents').entries()) if (!doc.deleted) await this.register(doc)
+    await this.registerCreator()
+  }
+  /** Built-in “Agent 创建助手”: a Studio-composed preset, so the same policy restricts its tools and prompt. */
+  async registerCreator() {
+    const definition = creatorDefinition(), plugins = this.rows(definition)
+    // Its tools exist on this Agent only; the row precedes the policy that selects them.
+    plugins.splice(plugins.findIndex(row => row.id === 'studio-policy'), 0, { id: 'studio-creator-tools', name: CREATOR_ROW })
+    const release = await this.ctx.agentPresets.register({ id: CREATOR_PRESET_ID, name: definition.name, description: definition.description, plugins })
+    this.registered.set(CREATOR_PRESET_ID, release)
   }
   lock(task) { const p = this.serial.then(task); this.serial = p.catch(() => {}); return p }
   document(id) { const doc = this.domain.table('agents').get(z.string().uuid().parse(id)); if (!doc || doc.deleted) throw error('Agent not found', 'NOT_FOUND'); return clone(doc) }
@@ -84,6 +98,8 @@ export class StudioService {
     const source=await this.ctx.agentPresets.readDocument(id)
     const rows=yaml.load(source.content,{schema:entryListSchema}), flat=[]
     const walk=entries=>{for(const row of entries){flat.push(row);if(row.group&&Array.isArray(row.config))walk(row.config)}};walk(rows)
+    const native=flat.find(row=>row.name==='dsh-workbench-agent-studio-runtime'&&row.config?.definition)
+    if(native)return {id,readOnly:true,revision:1,definition:Definition.parse({...native.config.definition,name:source.name||native.config.definition.name})}
     const persona=flat.find(row=>row.name==='@deepseek-ai/dsh-persona')?.config
     const catalog=await this.catalogRows(cwd,rows)
     return {id,readOnly:true,revision:1,runtime:{source:id,toolPresentation:flat.find(row=>row.name==='@deepseek-ai/dsh-agent-tool-presentation')?.config?.mode||'native'},baseYaml:source.content,definition:Definition.parse({name:source.name||id,description:source.description||'',modelSelection:'global',provider:'',model:'',systemPrompt:persona?.prefix||'',promptMode:'template',tools:catalog.tools.map(t=>t.name).filter(n=>n!=='run_code'),skills:catalog.tools.some(t=>t.name==='skill')?catalog.skills.map(s=>s.name):[]})}
@@ -123,7 +139,7 @@ export class StudioService {
       // never invoke a model or a tool while reading the directory.
       handle = await this.ctx.agents.create({ sessionId: randomUUID(), signal: this.lifetime.signal, meta: { cwd: path, agentPreset: id }, setup: c => this.ctx.agentPresets.mount(c, id).then(() => {}) })
       const tools = await toolsForScope(this.ctx, handle.agent)
-      const skills = (await this.ctx.skills.list({ cwd: path, scope: handle.agent })).filter(s => s.invocation.modelInvocable).map(s => { const owner = skillOwner(s.path ?? (s.resourceBase?.kind === 'directory' ? s.resourceBase.path : undefined)); return { name: s.name, description: s.description, ...(typeof s.source === 'string' ? { source: s.source } : {}), ...(owner ? { owner } : {}) } })
+      const skills = (await this.ctx.skills.list({ cwd: path, scope: handle.agent })).filter(s => s.invocation.modelInvocable).map(s => { const owner = skillOwner(s.path ?? (s.resourceBase?.kind === 'directory' ? s.resourceBase.path : undefined)) ?? (s.provider === 'workbench-agent-studio' ? 'dsh-workbench-agent-studio' : undefined); return { name: s.name, description: s.description, ...(typeof s.source === 'string' ? { source: s.source } : {}), ...(owner ? { owner } : {}) } })
       return { tools, skills }
     } finally { if (handle) await handle.dispose(); await release() }
   }
@@ -142,6 +158,26 @@ export class StudioService {
       if (!unavailable.length) unavailable.push({ provider: 'combined', reason: cause.message })
       return { tools: [...tools.values()], skills: [...skills.values()], unavailable }
     }
+  }
+  /**
+   * A built-in preset, or a copy of one, runs its own composition, which can
+   * mount tools the Studio providers do not offer (`present`, `plugin_manager`,
+   * a plugin's own preset tools) and Skills they do not list. Add those rows
+   * with their real owners, so the editor does not report them as missing.
+   * Reading them is best effort.
+   */
+  async inheritedCapabilities(result, source, cwd) {
+    try {
+      const doc = this.domain.table('agents').get(source)
+      let rows
+      if (doc) { if (!doc.baseYaml || doc.deleted) return; rows = this.rows(doc.definition, false, doc.baseYaml, doc.connectorSnapshot).filter(row => row.id !== 'studio-policy') }
+      else if (source.startsWith('wb-studio-')) return
+      // The policy row selects tools; it is left out so the probe sees what the composition offers.
+      else rows = yaml.load((await this.ctx.agentPresets.readDocument(source)).content, { schema: entryListSchema }).filter(row => row.id !== 'studio-policy')
+      const own = await this.catalogRows(cwd, rows), known = new Set(result.tools.map(tool => tool.name)), skills = new Set(result.skills.map(skill => skill.name))
+      for (const tool of own.tools) if (!known.has(tool.name) && tool.name !== 'run_code') result.tools.push(tool)
+      for (const skill of own.skills) if (!skills.has(skill.name)) result.skills.push(skill)
+    } catch { this.lifetime.signal.throwIfAborted() }
   }
   async capabilities(doc, cwd) {
     // A copied preset's disabled rows, configured variants and shadowed tools
@@ -174,7 +210,7 @@ export class StudioService {
       case 'ownerMigrationPreview': return this.ownerMigrations.preview(args)
       case 'ownerMigrationApply': return this.ownerMigrations.apply(args)
       case 'ownerMigrationUndo': return this.ownerMigrations.undo(args)
-      case 'bootstrap': return { presets: (await this.ctx.agentPresets.list()).filter(p=>!p.id.startsWith('wb-studio-')), defaultModel:this.ctx.get('agentDefaultModel')?.currentSelection(), cwd: this.cwd, agents: [...this.domain.table('agents').entries()].map(([, value]) => value).filter(d => !d.deleted), capabilityBindings: true, version: '1.11.2', harness: '0.1.7-rc.2' }
+      case 'bootstrap': return { presets: (await this.ctx.agentPresets.list()).filter(p=>!p.id.startsWith('wb-studio-')), defaultModel:this.ctx.get('agentDefaultModel')?.currentSelection(), cwd: this.cwd, agents: [...this.domain.table('agents').entries()].map(([, value]) => value).filter(d => !d.deleted), capabilityBindings: true, version: manifest.version, harness: getDshRuntimeVersion() }
       case 'readPreset': return this.readPreset(z.string().parse(args.id), args.cwd || this.cwd)
       case 'copyPreset': return this.lock(async()=>{const preset=await this.readPreset(args.id,args.cwd||this.cwd), t=now(); const doc=Document.parse({id:randomUUID(),revision:1,createdAt:t,updatedAt:t,definition:{...preset.definition,name:args.name||preset.definition.name+' 副本'},baseYaml:preset.baseYaml,runtime:preset.runtime,sourcePreset:args.id});await this.domain.table('agents').put(doc.id,doc);await this.domain.table('revisions').put(`${doc.id}:1`,doc);await this.register(doc);return doc})
       case 'receipts': return [...this.domain.table('receipts').entries()].map(([,v])=>v).filter(v=>v.runId===args.id)
@@ -187,7 +223,7 @@ export class StudioService {
       case 'connectorSelect': await this.connector.detail(z.string().parse(args)); return true
       case 'connectorConsole': return this.connector.consoleUrl()
       case 'models': return chatModelGroups(await Promise.all(this.ctx.llm.listProviders().map(async p => ({ ...p, models: await this.ctx.llm.listModels(p.id).catch(() => []) }))))
-      case 'catalog': {const result=await this.catalog(z.string().parse(args.cwd));if(this.connector)result.tools.push(...await this.connector.catalog(args.selected||[]));return {...result,capabilityBindings:true}}
+      case 'catalog': {const result=await this.catalog(z.string().parse(args.cwd));if(typeof args.source==='string')await this.inheritedCapabilities(result,args.source,args.cwd);if(this.connector)result.tools.push(...await this.connector.catalog(args.selected||[]));return {...result,capabilityBindings:true}}
       case 'create': return this.lock(async () => {
         const t = now(), doc = Document.parse({ id: randomUUID(), revision: 1, createdAt: t, updatedAt: t, definition: { name: z.string().parse(args.name), description: '', modelSelection: 'unset', provider: '', model: '', systemPrompt: '', tools: [], skills: [] } })
         await this.domain.table('agents').put(doc.id, doc); await this.domain.table('revisions').put(`${doc.id}:1`, doc); await this.register(doc); return doc
@@ -248,13 +284,20 @@ export class StudioService {
         const workspace = await this.ctx.workspaceRegistry.create(await this.directory(args.cwd))
         return this.ctx.sessionController.create({ workspaceId: workspace.id, agentPreset: `wb-studio-${doc.id}` })
       })
+      // Creator tool operations: reachable from registered tools, not from the HTTP route.
+      case 'creatorCatalog': return creatorCatalog(this, args)
+      case 'creatorCheck': return creatorCheck(this, args)
+      case 'draftPrompt': return draftPrompt(this, args)
+      case 'saveDraft': return saveDraft(this, args)
+      case 'trialDraft': return trialDraft(this, args)
       case 'prompt': return this.startPrompt(z.object({ id: z.string().uuid(), instruction: z.string().min(1).max(20000), original: z.string().max(150000), cwd: z.string().optional(), definition: Definition }).strict().parse(args))
       case 'getPrompt': { const p = this.domain.table('prompts').get(args.id); if (!p) throw error('Prompt not found'); return p }
       case 'stopPrompt': { const job = this.promptJobs?.get(args.id); job?.controller.abort(); if (job) await job.done; return this.domain.table('prompts').get(args.id) }
       default: throw error('Unknown operation', 'NOT_FOUND')
     }
   }
-  async startRun(input, sourceDocument) {
+  /** `safety: 'read-only'` (creator trials) records non-read-only tool calls instead of executing them. */
+  async startRun(input, sourceDocument, { safety } = {}) {
     validateInput(input.messages)
     const original = sourceDocument || this.document(input.id)
     if (original.revision !== input.revision) throw error('Agent 已更新，请重新保存后运行。', 'REVISION_CONFLICT')
@@ -264,7 +307,7 @@ export class StudioService {
     const document = await this.preflight(original, cwd, controller.signal)
     const handle = await this.createHandle(document, cwd, controller.signal)
     const record = Run.parse({ id: randomUUID(), sessionId: handle.agent.id, document, cwd, mode: input.mode, maxSteps: input.maxSteps, input: input.messages, output: [], status: 'running', createdAt: now() })
-    const live = { controller, handle, record }
+    const live = { controller, handle, record, safety }
     try { await this.domain.table('runs').put(record.id, record) } catch (e) { await handle.dispose(); throw e }
     this.live.set(record.id, live)
     live.done = this.drive(live).finally(async () => { this.lifetime.signal.removeEventListener('abort', stop); await handle.dispose(); this.live.delete(record.id) })
@@ -273,6 +316,7 @@ export class StudioService {
   }
   async callTool(live, tool) {
     if (!(live.record.document.definition.tools.map(t=>t.replace(/^openconnector\//,'')).includes(tool.name) || (live.record.document.baseYaml && tool.name==='run_code'))) throw error('Tool is not enabled for this Agent', 'TOOL_DENIED')
+    if (live.safety === 'read-only' && !isReadOnlyTool(tool.name)) return unexecutedResult(tool.name)
     let args
     try { args = tool.arguments ? JSON.parse(tool.arguments) : {} } catch { args = tool.arguments }
     const result = await this.ctx.tools.execute({ agent: live.handle.agent, callId: randomUUID(), name: tool.name, arguments: args, signal: live.controller.signal })

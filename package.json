@@ -1,7 +1,7 @@
 {
   "name": "dsh-workbench-agent-studio",
-  "version": "1.11.5",
-  "description": "Agent Studio for official DeepSeek Harness 0.1.7-rc.2",
+  "version": "1.13.3",
+  "description": "Visual Agent Studio for DeepSeek Harness Web",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -16,7 +16,12 @@
     "locale",
     "cordis.patch.yml",
     "README.md",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "screenshots.json",
+    "media"
   ],
   "dsh": {
     "bundle": {
@@ -24,7 +29,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh": "0.1.7-rc.2"
+    "@deepseek-ai/dsh": "0.1.7-rc.2 || 0.2.0-rc.2"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -47,9 +52,9 @@
     "zustand": "4.4.7"
   },
   "dependencies": {
-    "dsh-workbench-agent-studio-service": "1.11.2",
-    "dsh-workbench-agent-studio-runtime": "1.10.1",
-    "dsh-workbench-agent-studio-ui": "1.11.5"
+    "dsh-workbench-agent-studio-service": "1.13.3",
+    "dsh-workbench-agent-studio-runtime": "1.10.5",
+    "dsh-workbench-agent-studio-ui": "1.13.3"
   },
   "bundledDependencies": [
     "dsh-workbench-agent-studio-service",
@@ -58,5 +63,27 @@
   ],
   "workspaces": [
     "packages/*"
-  ]
+  ],
+  "engines": {
+    "dsh": "0.1.7-rc.2 || 0.2.0-rc.2",
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lucky01222/dsh-workbench-agent-studio.git"
+  },
+  "homepage": "https://github.com/lucky01222/dsh-workbench-agent-studio#readme",
+  "bugs": {
+    "url": "https://github.com/lucky01222/dsh-workbench-agent-studio/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "agent",
+    "preset",
+    "workflow"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

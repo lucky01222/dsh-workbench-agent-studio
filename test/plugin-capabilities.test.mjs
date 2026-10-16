@@ -39,13 +39,13 @@ test('a stale flat tool preview cannot re-enable explicit disabled bindings whil
  assert.deepEqual(restored,selection);assert.deepEqual(flattenPluginSelection(restored,catalog),['library_search'])
 })
 
-test('verified contracts retain 16 official owners / 29 tools and 4 custom owners / 28 tools', () => {
+test('verified contracts retain 17 official owners / 30 tools and 5 custom owners / 34 tools', () => {
   const official = KNOWN_PLUGIN_CONTRACTS.filter(item => item.origin === 'official')
   const custom = KNOWN_PLUGIN_CONTRACTS.filter(item => item.origin === 'custom')
-  assert.equal(official.length, 16)
-  assert.equal(official.flatMap(item => item.names).length, 29)
-  assert.equal(custom.length, 4)
-  assert.equal(custom.flatMap(item => item.names).length, 28)
+  assert.equal(official.length, 17)
+  assert.equal(official.flatMap(item => item.names).length, 30)
+  assert.equal(custom.length, 5)
+  assert.equal(custom.flatMap(item => item.names).length, 34)
 })
 
 test('known owner does not imply installation or tool availability; live description is retained', () => {
@@ -246,6 +246,33 @@ test('a tool moving to another authoritative owner remains missing under the sav
   const legacy = selectionFromTools(['read'], buildPluginCatalog([{ name: 'read', description: '', pluginId: 'other-reader' }]))
   assert.equal(legacy['other-reader'], undefined)
   assert.deepEqual(legacy.unassigned.tools, ['read'])
+})
+
+test('a legacy tool no contract mentions follows the Host owner; only a contradicted name stays unassigned', () => {
+  const catalog = buildPluginCatalog([
+    { name: 'mcp__memory__find', description: '', pluginId: '@vendor/memory-plugin' },
+    { name: 'present', description: '', pluginId: '@deepseek-ai/dsh-tool-present' },
+    { name: 'read', description: '', pluginId: 'other-reader' },
+  ], { capabilityBindings: true })
+  const legacy = selectionFromTools(['mcp__memory__find', 'present', 'read'], catalog)
+  assert.deepEqual(legacy['@vendor/memory-plugin'], { enabled: true, mode: 'custom', tools: ['mcp__memory__find'] })
+  assert.deepEqual(legacy['@deepseek-ai/dsh-tool-present'].tools, ['present'])
+  assert.deepEqual(legacy.unassigned.tools, ['read'])
+  assert.equal(plugin(catalog, '@deepseek-ai/dsh-tool-present').name, '文件交付')
+})
+
+test('a live built-in preset list takes every Host owner, including one an old contract placed elsewhere', () => {
+  const rows = [
+    { name: 'library_search', description: '', pluginId: 'dsh-workbench-library', pluginVersion: '0.29.4' },
+    { name: 'read_image', description: '', pluginId: 'dsh-workbench-agent-studio' },
+    { name: 'gone', description: '', pluginId: null, unavailable: '当前运行位置不可用' },
+  ]
+  const catalog = buildPluginCatalog(rows, { capabilityBindings: true })
+  const live = selectionFromTools(['library_search', 'read_image', 'gone'], catalog, undefined, { live: true })
+  assert.deepEqual(live['dsh-workbench-library'].tools, ['library_search'])
+  assert.deepEqual(live['dsh-workbench-agent-studio'].tools, ['read_image'])
+  assert.deepEqual(live.unassigned.tools, ['gone'])
+  assert.equal(summarizePluginSelection(live, catalog).unavailable, 1)
 })
 
 test('official bundle stays partial when a saved official plugin has lost every available tool', () => {

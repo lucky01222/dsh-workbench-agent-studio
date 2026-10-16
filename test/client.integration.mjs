@@ -107,8 +107,9 @@ test('recovering an unknown migration keeps unsaved persona edits and merges onl
  assert.deepEqual(f.calls.filter(call=>call.method==='ownerMigrationApply').map(call=>call.args),[request,request]);assert.equal(f.calls.some(call=>call.method==='save'),false);c.dispose()
 })
 test('recovering an unknown migration preserves changed local tool choices as a conflict',async()=>{
+ // The added tool is grouped under its Host owner, so its position in the flat list is not part of the choice.
  const f=migrationSetup();await f.open();const c=f.c;f.loseNextApply();await assert.rejects(c.ownerMigrationApply(),/connection lost/);c.change({systemPrompt:'local persona',tools:[...c.getSnapshot().draft.tools,'library_sources']});const local=structuredClone(c.getSnapshot().draft)
- await c.ownerMigrationApply();assert.equal(c.getSnapshot().status,'conflict');assert.deepEqual(c.getSnapshot().draft,local);assert.equal(c.getSnapshot().document.definition.tools.length,12);assert.equal(c.getSnapshot().ownerMigration.pendingApply,null);c.dispose()
+ await c.ownerMigrationApply();assert.equal(c.getSnapshot().status,'conflict');const kept=c.getSnapshot().draft;assert.deepEqual({...kept,tools:[...kept.tools].sort()},{...local,tools:[...local.tools].sort()});assert.equal(c.getSnapshot().document.definition.tools.length,12);assert.equal(c.getSnapshot().ownerMigration.pendingApply,null);c.dispose()
 })
 test('an apply replay after another window undid it reads current state without a transient grant or losing persona edits',async()=>{
  const f=migrationSetup();await f.open();const c=f.c;await c.ownerMigrationPreview('current');f.loseNextApply();await assert.rejects(c.ownerMigrationApply(),/connection lost/);const request=structuredClone(c.getSnapshot().ownerMigration.pendingApply)
@@ -145,6 +146,14 @@ test('a restored pending request cannot target a different Agent and a mismatche
  await c.ownerMigrationPreview();const submitted=c.getSnapshot(),docBefore=structuredClone(submitted.document)
  await assert.rejects(c.acceptOwnerMigration({document:{...docBefore,revision:2},receipt:{id:'another-operation',agentId:'a',status:'applied',sourceRevision:1,policy:'saved',permissionHash:'saved-permissions',catalogHash:'current-catalog'}},submitted,{...request,id:'a',operationId:'expected'},'apply'),/回执身份/)
  assert.deepEqual(c.getSnapshot().document,docBefore);await c.ownerMigrationApply();const after=c.getSnapshot();c.publish({ownerMigration:{...after.ownerMigration,pendingUndo:{id:'b',operationId:after.ownerMigration.receipt.id,undoOperationId:'foreign-undo',cwd:'/workspace'}}});await assert.rejects(c.ownerMigrationUndo(),/身份不匹配/);assert.equal(f.calls.some(call=>call.method==='ownerMigrationUndo'),false);c.dispose()
+})
+test('a read-only preset regroups by Host owner on every catalog read, ignoring a selection cached by an earlier version',async()=>{
+ const preset={id:'standard',revision:1,readOnly:true,definition:{...definition,name:'standard',tools:['mcp__memory__find','present']}},calls=[]
+ const c=setup({readPreset:async()=>preset,catalog:async args=>{calls.push(args);return {tools:[{name:'mcp__memory__find',description:'',pluginId:'@vendor/memory'},...(args.source==='standard'?[{name:'present',description:'',pluginId:'@deepseek-ai/dsh-tool-present'}]:[])],skills:[],capabilityBindings:true}}})
+ await c.open('standard');let s=c.getSnapshot()
+ assert.equal(calls.at(-1).source,'standard');assert.equal(s.pluginSelection.unassigned,undefined);assert.deepEqual(s.pluginSelection['@vendor/memory'].tools,['mcp__memory__find'])
+ c.publish({pluginSelection:{unassigned:{enabled:true,mode:'custom',tools:['mcp__memory__find','present']}},pluginIntentWorkspace:c.pluginWorkspace()});await c.refreshCatalog();s=c.getSnapshot()
+ assert.equal(s.pluginSelection.unassigned,undefined);assert.deepEqual(s.pluginSelection['@deepseek-ai/dsh-tool-present'].tools,['present']);c.dispose()
 })
 test('late preset selection cannot replace later tab',async()=>{const d=deferred(),c=setup({readPreset:()=>d.promise});const first=c.open('preset');await c.open('b');d.resolve({...doc('preset'),readOnly:true});await first;assert.equal(c.getSnapshot().document.id,'b');c.dispose()})
 test('same-tab history uses last selection despite reversed responses',async()=>{const a=deferred(),b=deferred(),c=setup({getRun:({id})=>id==='a'?a.promise:b.promise});const p=c.openRun('a'),q=c.openRun('b');b.resolve(run('b'));await q;a.resolve(run('a'));await p;assert.equal(c.getSnapshot().runState.run.id,'b');c.dispose()})
